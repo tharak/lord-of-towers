@@ -32,6 +32,7 @@
       document.querySelector('#loading').style.display = 'none';
       const panel = document.querySelector('#error');
       panel.style.display = 'grid';
+      if (panel.hasAttribute("data-panic")) { console.error(panel.getAttribute("data-panic")); return; }
       panel.textContent = `Unable to start Lord of Towers.\n${message}\nTry a desktop browser with WebGL2 enabled, then reload.`;
     };
     window.addEventListener('error', (event) => showError(event.error || event.message));

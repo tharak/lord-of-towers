@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test('battlefield loads, spawns armies, and spectator controls work', async ({ page }, testInfo) => {
   const errors = [];
+  page.on('console', message => { if (message.type() === 'error') console.log('Browser console:', message.text()); });
   page.on('pageerror', error => {
     if (!error.message.includes('Using exceptions for control flow')) errors.push(error.message);
   });
@@ -10,7 +11,8 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   });
   await page.goto('./');
   const status = page.locator('#game-status');
-  await expect(status).toHaveAttribute('data-ready', 'true');
+  try { await expect(status).toHaveAttribute('data-ready', 'true'); }
+  catch (error) { console.log('Startup error panel:', await page.locator('#error').textContent()); throw error; }
   await expect(page.locator('#loading')).toBeHidden();
   await expect(page.locator('#error')).toBeHidden();
   await expect(status).toHaveAttribute('data-towers', '5');
@@ -38,6 +40,8 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await page.setViewportSize({ width: 1100, height: 700 });
   await expect.poll(async () => page.locator('#game').evaluate(el => el.clientWidth)).toBe(1100);
   await page.screenshot({ path: testInfo.outputPath('battlefield.png') });
+  console.log('Final error panel:', await page.locator('#error').textContent());
+  await expect(page.locator('#error')).toBeHidden();
   expect(errors).toEqual([]);
 });
 

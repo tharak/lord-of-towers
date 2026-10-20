@@ -298,6 +298,7 @@ mod tests {
     #[test]
     fn filters_follow_live_world_and_never_retain_despawned_entities() {
         let mut world = World::new();
+        let baseline = matching_entities(&mut world, 0, 0, true).1.len();
         let faction = world
             .spawn((
                 Faction { index: 2 },
@@ -310,7 +311,10 @@ mod tests {
             .id();
         world.spawn_empty();
         assert_eq!(matching_entities(&mut world, 0, 0, false).1.len(), 2);
-        assert_eq!(matching_entities(&mut world, 0, 0, true).1.len(), 3);
+        assert_eq!(
+            matching_entities(&mut world, 0, 0, true).1.len(),
+            baseline + 3
+        );
         assert_eq!(matching_entities(&mut world, 3, 3, false).1, vec![minion]);
         world.despawn(minion);
         assert!(matching_entities(&mut world, 3, 3, false).1.is_empty());

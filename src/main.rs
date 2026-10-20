@@ -11,6 +11,7 @@ fn main() {
             && let Some(error) = document.get_element_by_id("error")
         {
             error.set_text_content(Some(&format!("The game could not continue: {info}")));
+            let _ = error.set_attribute("data-panic", &info.to_string());
             let _ = error.set_attribute("style", "display: grid");
         }
     }));

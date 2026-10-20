@@ -134,7 +134,7 @@ fn update_influence(
     }
     field.elapsed %= INTERVAL;
     field.half_extent = config.half_extent;
-    let sources: Vec<_> = emitters
+    let mut sources: Vec<_> = emitters
         .iter()
         .filter_map(|(position, allegiance, emitter)| {
             factions
@@ -143,6 +143,11 @@ fn update_influence(
                 .map(|faction| (position.0, faction.index, emitter.radius, emitter.strength))
         })
         .collect();
+    sources.sort_by(|a, b| {
+        a.1.cmp(&b.1)
+            .then(a.0.x.total_cmp(&b.0.x))
+            .then(a.0.y.total_cmp(&b.0.y))
+    });
     field.rebuild(&sources);
 }
 #[cfg(test)]

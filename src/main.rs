@@ -7,11 +7,11 @@ use lord_of_towers::{
 fn main() {
     #[cfg(target_arch = "wasm32")]
     std::panic::set_hook(Box::new(|info| {
-        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            if let Some(error) = document.get_element_by_id("error") {
-                error.set_text_content(Some(&format!("The game could not continue: {info}")));
-                let _ = error.set_attribute("style", "display: grid");
-            }
+        if let Some(document) = web_sys::window().and_then(|window| window.document())
+            && let Some(error) = document.get_element_by_id("error")
+        {
+            error.set_text_content(Some(&format!("The game could not continue: {info}")));
+            let _ = error.set_attribute("style", "display: grid");
         }
     }));
     let window = Window {

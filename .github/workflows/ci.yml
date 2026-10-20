@@ -52,7 +52,7 @@ jobs:
       - run: npx playwright install --with-deps chromium firefox
       - run: npm test
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: browser-diagnostics
           path: |
@@ -95,7 +95,7 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: ${{ needs.deploy.outputs.url }}
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: deployed-browser-diagnostics
           path: |

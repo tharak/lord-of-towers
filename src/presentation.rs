@@ -98,6 +98,7 @@ fn setup(
         EntityKind::Camera,
         SpectatorCamera,
         Camera3d::default(),
+        bevy::core_pipeline::tonemapping::Tonemapping::SomewhatBoringDisplayTransform,
         Projection::from(OrthographicProjection {
             scaling_mode: ScalingMode::FixedVertical {
                 viewport_height: 120.0,
@@ -141,12 +142,12 @@ fn setup(
                     ..default()
                 },
             ));
-            for i in 0..5 {
+            for (i, name) in FACTION_NAMES.iter().enumerate() {
                 parent.spawn((
-                    Name::new(format!("{} statistics", FACTION_NAMES[i])),
+                    Name::new(format!("{name} statistics")),
                     EntityKind::Ui,
                     FactionText(i),
-                    Text::new(FACTION_NAMES[i]),
+                    Text::new(*name),
                     TextColor(faction_color(i)),
                     TextFont {
                         font_size: FontSize::Px(14.0),
@@ -459,4 +460,72 @@ fn browser_visibility(mut state: ResMut<MatchState>) {
             resumed
         });
     state.browser_hidden = document.hidden() || resumed;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn units_share_faction_materials_and_capture_recolors_only_the_tower() {
+        let mut app = App::new();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let palette: Vec<_> = (0..5)
+            .map(|index| materials.add(StandardMaterial::from(faction_color(index))))
+            .collect();
+        app.insert_resource(VisualAssets {
+            tower: meshes.add(Cuboid::new(3.0, 7.0, 3.0)),
+            minion: meshes.add(Capsule3d::new(0.42, 0.7)),
+            ground: meshes.add(Plane3d::default().mesh().size(100.0, 100.0)),
+            materials: palette.clone(),
+        });
+        app.add_systems(Update, (attach_visuals, sync_visuals).chain());
+        let original = app.world_mut().spawn(Faction { index: 0 }).id();
+        let conqueror = app.world_mut().spawn(Faction { index: 1 }).id();
+        let tower = app
+            .world_mut()
+            .spawn((
+                Tower { slot: 0 },
+                Allegiance(original),
+                Position(Vec2::ZERO),
+            ))
+            .id();
+        let minion = app
+            .world_mut()
+            .spawn((Minion, Allegiance(original), Position(Vec2::new(2.0, 3.0))))
+            .id();
+        app.world_mut().run_schedule(Update);
+        for entity in [tower, minion] {
+            assert_eq!(
+                app.world()
+                    .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                    .unwrap()
+                    .0,
+                palette[0]
+            );
+        }
+        app.world_mut()
+            .entity_mut(tower)
+            .insert(Allegiance(conqueror));
+        app.world_mut().run_schedule(Update);
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(tower)
+                .unwrap()
+                .0,
+            palette[1]
+        );
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(minion)
+                .unwrap()
+                .0,
+            palette[0]
+        );
+        assert_eq!(
+            app.world().get::<Position>(minion).unwrap().0,
+            Vec2::new(2.0, 3.0)
+        );
+    }
 }

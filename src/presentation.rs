@@ -286,7 +286,7 @@ fn ground_colors(
     if *revision == Some(field.revision) {
         return;
     }
-    let Some(mesh) = meshes.get_mut(&assets.ground) else {
+    let Some(mut mesh) = meshes.get_mut(&assets.ground) else {
         return;
     };
     let Some(VertexAttributeValues::Float32x3(positions)) =

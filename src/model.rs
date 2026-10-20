@@ -4,7 +4,7 @@ pub const FACTION_NAMES: [&str; 5] = [
     "Orthanc",
     "Minas Morgul",
     "White Tower of Minas Tirith",
-    "Barad-dûr",
+    "Barad-dur",
     "Tower of Cirith Ungol",
 ];
 pub const FACTION_RGB: [[u8; 3]; 5] = [

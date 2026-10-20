@@ -206,6 +206,22 @@ fn matching_entities(
     (total, matched)
 }
 
+// Preserve generic wrappers while removing module paths from each type token.
+fn short_type_name(name: &str) -> String {
+    let mut result = String::new();
+    let mut token = String::new();
+    for character in name.chars().chain(std::iter::once(' ')) {
+        if character.is_alphanumeric() || character == '_' || character == ':' {
+            token.push(character);
+        } else {
+            result.push_str(token.rsplit("::").next().unwrap_or(&token));
+            token.clear();
+            result.push(character);
+        }
+    }
+    result.trim_end().to_owned()
+}
+
 fn refresh(world: &mut World) {
     let open = world.resource::<InspectorState>().open;
     let mut roots = world.query_filtered::<&mut Node, With<InspectorRoot>>();
@@ -240,7 +256,7 @@ fn refresh(world: &mut World) {
         FACTION_NAMES[faction - 1]
     };
     let mut text = format!(
-        "LIVE ECS — {total} entities, {} matching\nKind: {kind_name} | Faction: {faction_name}\nEngine entities: {} | Entity {}/{}\n",
+        "LIVE ECS -- {total} entities, {} matching\nKind: {kind_name} | Faction: {faction_name}\nEngine entities: {} | Entity {}/{}\n",
         entities.len(),
         if engine { "included" } else { "hidden" },
         if entities.is_empty() { 0 } else { page + 1 },
@@ -256,7 +272,7 @@ fn refresh(world: &mut World) {
         });
         let _ = writeln!(
             text,
-            "\n{id:?} — {name}\nKind: {:?}\nFaction: {}",
+            "\n{id:?} -- {name}\nKind: {:?}\nFaction: {}",
             entity.get::<EntityKind>(),
             faction.map_or("None", |f| FACTION_NAMES[f.index])
         );
@@ -278,7 +294,7 @@ fn refresh(world: &mut World) {
         );
         for name in components.iter().skip(component_page * 16).take(16) {
             // Short Rust type names fit the panel; names are obtained from ECS metadata.
-            let _ = writeln!(text, "• {}", name.rsplit("::").next().unwrap_or(name));
+            let _ = writeln!(text, "- {}", short_type_name(name));
         }
     } else {
         text.push_str("\nNo matching live entities.");

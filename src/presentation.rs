@@ -136,7 +136,7 @@ fn setup(
                 Name::new("Match status"),
                 EntityKind::Ui,
                 StatusText,
-                Text::new("Starting simulation…"),
+                Text::new("Starting simulation..."),
                 TextFont {
                     font_size: FontSize::Px(14.0),
                     ..default()
@@ -159,7 +159,7 @@ fn setup(
                 Name::new("Camera instructions"),
                 EntityKind::Ui,
                 Text::new(
-                    "Pan: WASD / arrows   Zoom: + / −\nSpace: pause   1/2/3: speed   R: restart",
+                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart",
                 ),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -172,7 +172,11 @@ fn setup(
                 EntityKind::Ui,
                 Text::new(format!(
                     "Build {}",
-                    option_env!("BUILD_COMMIT").unwrap_or("development")
+                    option_env!("BUILD_COMMIT")
+                        .unwrap_or("development")
+                        .chars()
+                        .take(7)
+                        .collect::<String>()
                 )),
                 TextFont {
                     font_size: FontSize::Px(11.0),
@@ -197,9 +201,9 @@ fn setup(
         .with_children(|parent| {
             for (label, control) in [
                 ("Pause / Play", Control::Pause),
-                ("1×", Control::Speed(1.0)),
-                ("2×", Control::Speed(2.0)),
-                ("4×", Control::Speed(4.0)),
+                ("1x", Control::Speed(1.0)),
+                ("2x", Control::Speed(2.0)),
+                ("4x", Control::Speed(4.0)),
                 ("Restart", Control::Restart),
                 ("Entities", Control::Inspector),
             ] {
@@ -396,14 +400,14 @@ fn update_hud(
     for (mut text, faction) in &mut texts {
         text.0 = if let Some(FactionText(i)) = faction {
             format!(
-                "{}  |  {} towers · {} minions · {:.0}%",
+                "{}  |  {} towers | {} minions | {:.0}%",
                 FACTION_NAMES[*i], towers[*i], minions[*i], territory[*i]
             )
         } else if let Some(winner) = state.winner {
             format!("{} wins! Restart to play again.", FACTION_NAMES[winner])
         } else {
             format!(
-                "{} · {:.0}× speed · {:.0}s",
+                "{} | {:.0}x speed | {:.0}s",
                 if state.paused { "Paused" } else { "Expanding" },
                 state.speed,
                 state.elapsed

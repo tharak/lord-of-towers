@@ -10,7 +10,7 @@ fn main() {
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
             if let Some(error) = document.get_element_by_id("error") {
                 error.set_text_content(Some(&format!("The game could not continue: {info}")));
-                let _ = error.remove_attribute("hidden");
+                let _ = error.set_attribute("style", "display: grid");
             }
         }
     }));

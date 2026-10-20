@@ -314,11 +314,7 @@ fn ground_colors(
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     *revision = Some(field.revision);
 }
-fn keyboard_controls(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<MatchState>,
-    mut inspector: ResMut<InspectorState>,
-) {
+fn keyboard_controls(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<MatchState>) {
     if keys.just_pressed(KeyCode::Space) {
         state.paused = !state.paused;
     }
@@ -333,9 +329,6 @@ fn keyboard_controls(
     }
     if keys.just_pressed(KeyCode::KeyR) {
         state.restart_requested = true;
-    }
-    if keys.just_pressed(KeyCode::F3) {
-        inspector.open = !inspector.open;
     }
 }
 fn button_controls(

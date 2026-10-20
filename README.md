@@ -44,6 +44,6 @@ Open http://127.0.0.1:4173/lord-of-towers/. The script installs the wasm-bindgen
 
 ## Testing and releases
 
-Routine testing runs in **GitHub Actions**, not on developer machines. Every PR checks formatting, Clippy, headless gameplay tests, a release WASM build, and Chromium/Firefox smoke tests. Main deploys only after those checks pass; a further smoke test checks the actual Pages URL. Scheduled/manual runs include an extended population-bound simulation. Browser failures retain screenshots and traces as workflow artifacts.
+Routine testing runs in **GitHub Actions**, not on developer machines. Every PR checks formatting, Clippy, headless gameplay tests, a release WASM build, and Chromium/Firefox smoke tests. Main deploys only after those checks pass; a further smoke test checks the actual Pages URL. Main, scheduled, and manual runs include an extended population-bound simulation. Browser failures retain screenshots and traces as workflow artifacts.
 
 Visual quality can be reviewed directly on Pages. No custom models, external textures, multiplayer, persistence, mobile controls or economy are included in this prototype.

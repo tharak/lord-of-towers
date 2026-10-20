@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111821">
+  <title>Lord of Towers</title>
+  <style>
+    [hidden] { display: none !important; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #111821; color: #eee; font-family: system-ui, sans-serif; }
+    #game { display: block; width: 100%; height: 100%; outline: none; }
+    #loading, #error { position: fixed; inset: 0; display: grid; place-content: center; padding: 2rem; text-align: center; background: #111821; z-index: 10; }
+    #loading h1 { font-weight: 500; letter-spacing: .12em; }
+    #loading p { color: #a7b8c9; }
+    #error { display: none; color: #ffb7a4; white-space: pre-wrap; }
+    #game-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    #build { position: fixed; bottom: 5px; right: 10px; font-size: 10px; color: #9aabbd; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="game" tabindex="0" aria-label="Lord of Towers simulation"></canvas>
+  <div id="loading"><h1>LORD OF TOWERS</h1><p>Preparing the battlefield…</p></div>
+  <div id="error" role="alert"></div>
+  <output id="game-status" aria-live="off">Loading</output>
+  <span id="build">Build __BUILD_SHA__</span>
+  <script type="module">
+    const showError = (error) => {
+      const message = error?.message || String(error);
+      // winit uses an exception to yield control to the browser event loop.
+      if (message.includes("Using exceptions for control flow")) return;
+      document.querySelector('#loading').style.display = 'none';
+      const panel = document.querySelector('#error');
+      panel.style.display = 'grid';
+      if (panel.hasAttribute("data-panic")) { console.error(panel.getAttribute("data-panic")); return; }
+      panel.textContent = `Unable to start Lord of Towers.\n${message}\nTry a desktop browser with WebGL2 enabled, then reload.`;
+    };
+    window.addEventListener('error', (event) => showError(event.error || event.message));
+    window.addEventListener('unhandledrejection', (event) => showError(event.reason));
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) document.querySelector('#game-status').setAttribute('data-resumed', 'true');
+    });
+    const probe = document.createElement('canvas');
+    if (!probe.getContext('webgl2')) {
+      showError(new Error('WebGL2 is unavailable.'));
+    } else {
+      try {
+        const { default: init } = await import('./pkg/lord_of_towers.js');
+        await init();
+      } catch (error) { showError(error); }
+    }
+  </script>
+</body>
+</html>

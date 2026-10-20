@@ -6,7 +6,7 @@ Simulation uses Position(Vec2) on X/Z; Y is visual height. Faction index is reso
 
 InfluenceField must expose `sample(position: Vec2) -> [f32; 5]`, `territory_percentages() -> [f32; 5]`, public `revision: u64`, and `half_extent: f32`. Influence sampling runs in SimSet::Influence, at 10 Hz simulation time. Presence uses a finite radial falloff, with strongest influence controlling territory and ties contested. Presentation reads InfluenceField to color ground; AI may query sample for target scoring.
 
-SimulationPlugin configures ordered SimSet chain Spawn → Index → Target → Movement → Combat → Capture → Influence → Victory, gated by simulation_running. Fixed time runs at 30 Hz. simulation_delta applies speed. Restart is serviced in Update even while paused. MatchState is the control interface.
+SimulationPlugin configures ordered SimSet chain Spawn → Index → Target → Movement → Combat → Capture → Influence → Victory, gated by simulation_running. Fixed time runs at 30 Hz. simulation_delta applies speed. Restart is serviced in PreUpdate even while paused, with deferred despawns flushed before fixed simulation and presentation Update. This prevents visual commands from targeting entities removed by a restart. MatchState is the control interface.
 
 Use a 100×100 world, five towers on a radius-32 circle. Initial balance defaults live in SimulationConfig. Independent seeded random choices break symmetry without nondeterministic test expectations.
 

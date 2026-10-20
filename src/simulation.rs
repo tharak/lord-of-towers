@@ -1,4 +1,6 @@
 //! Deterministic, renderer-independent match systems.
+// ECS system parameters describe independent access; splitting them obscures scheduling.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 use std::collections::HashMap;
 
 use bevy::prelude::*;
@@ -14,6 +16,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<FactionEntities>()
             .init_resource::<SpatialIndex>()
             .init_resource::<PendingDamage>()
+            .init_resource::<SpawnSequence>()
             .insert_resource(RandomStream(42))
             .insert_resource(Time::<Fixed>::from_hz(30.0))
             .configure_sets(
@@ -51,6 +54,12 @@ impl Plugin for SimulationPlugin {
     }
 }
 
+// Stable across restart, unlike Bevy entity allocation and archetype iteration order.
+#[derive(Component, Clone, Copy)]
+struct SimulationId(u64);
+#[derive(Resource, Default)]
+struct SpawnSequence(u64);
+
 #[derive(Resource)]
 struct RandomStream(u64);
 impl RandomStream {
@@ -73,6 +82,7 @@ struct Neighbor {
     position: Vec2,
     faction: Entity,
     tower: bool,
+    stable_id: u64,
 }
 
 #[derive(Resource, Default)]
@@ -104,7 +114,9 @@ fn setup_match(
     config: Res<SimulationConfig>,
     mut factions: ResMut<FactionEntities>,
     mut random: ResMut<RandomStream>,
+    mut sequence: ResMut<SpawnSequence>,
 ) {
+    sequence.0 = 5;
     create_match(&mut commands, &config, &mut factions, &mut random);
 }
 
@@ -133,6 +145,7 @@ fn create_match(
             EntityKind::Tower,
             MatchEntity,
             Tower { slot: index },
+            SimulationId(index as u64),
             Allegiance(faction),
             Position(position),
             Health {
@@ -162,6 +175,7 @@ fn restart_match(
     mut spatial: ResMut<SpatialIndex>,
     mut damage: ResMut<PendingDamage>,
     field: Option<ResMut<InfluenceField>>,
+    mut sequence: ResMut<SpawnSequence>,
 ) {
     if !state.restart_requested {
         return;
@@ -176,6 +190,7 @@ fn restart_match(
     };
     spatial.0.clear();
     damage.0.clear();
+    sequence.0 = 5;
     if let Some(mut field) = field {
         field.clear();
     }
@@ -192,7 +207,8 @@ fn spawn_minions(
     state: Res<MatchState>,
     config: Res<SimulationConfig>,
     mut random: ResMut<RandomStream>,
-    mut towers: Query<(Entity, &Position, &Allegiance, &mut Spawner), With<Tower>>,
+    mut towers: Query<(Entity, &Position, &Allegiance, &mut Spawner, &Tower)>,
+    mut sequence: ResMut<SpawnSequence>,
     minions: Query<&OriginTower, With<Minion>>,
 ) {
     let dt = simulation_delta(&time, &state);
@@ -201,10 +217,13 @@ fn spawn_minions(
         *counts.entry(origin.0).or_default() += 1;
     }
     // Stable order makes seeded spawn variation reproducible after restart.
-    let mut order: Vec<_> = towers.iter().map(|(entity, ..)| entity).collect();
-    order.sort_by_key(|entity| entity.to_bits());
-    for entity in order {
-        let Ok((tower, position, allegiance, mut spawner)) = towers.get_mut(entity) else {
+    let mut order: Vec<_> = towers
+        .iter()
+        .map(|(entity, _, _, _, tower)| (tower.slot, entity))
+        .collect();
+    order.sort_by_key(|(slot, _)| *slot);
+    for (_, entity) in order {
+        let Ok((tower, position, allegiance, mut spawner, _)) = towers.get_mut(entity) else {
             continue;
         };
         spawner.elapsed += dt;
@@ -222,7 +241,10 @@ fn spawn_minions(
                 Vec2::splat(-config.half_extent),
                 Vec2::splat(config.half_extent),
             );
+            let stable_id = sequence.0;
+            sequence.0 += 1;
             commands.spawn((
+                SimulationId(stable_id),
                 Name::new("Minion"),
                 EntityKind::Minion,
                 MatchEntity,
@@ -256,10 +278,16 @@ fn spawn_minions(
 
 fn rebuild_index(
     mut spatial: ResMut<SpatialIndex>,
-    units: Query<(Entity, &Position, &Allegiance, Option<&Tower>)>,
+    units: Query<(
+        Entity,
+        &Position,
+        &Allegiance,
+        Option<&Tower>,
+        Option<&SimulationId>,
+    )>,
 ) {
     spatial.0.clear();
-    for (entity, position, faction, tower) in &units {
+    for (entity, position, faction, tower, stable_id) in &units {
         spatial
             .0
             .entry(SpatialIndex::cell(position.0))
@@ -269,10 +297,11 @@ fn rebuild_index(
                 position: position.0,
                 faction: faction.0,
                 tower: tower.is_some(),
+                stable_id: stable_id.map_or(entity.to_bits(), |id| id.0),
             });
     }
     for bucket in spatial.0.values_mut() {
-        bucket.sort_by_key(|entry| entry.entity.to_bits());
+        bucket.sort_by_key(|entry| entry.stable_id);
     }
 }
 
@@ -283,15 +312,27 @@ fn choose_targets(
     spatial: Res<SpatialIndex>,
     field: Option<Res<InfluenceField>>,
     factions: Query<&Faction>,
-    towers: Query<(&Position, &Allegiance), With<Tower>>,
-    mut minions: Query<(Entity, &Position, &Allegiance, &mut Movement), With<Minion>>,
+    towers: Query<(&Position, &Allegiance, &Tower)>,
+    mut minions: Query<
+        (
+            Entity,
+            &Position,
+            &Allegiance,
+            &mut Movement,
+            Option<&SimulationId>,
+        ),
+        With<Minion>,
+    >,
     mut random: ResMut<RandomStream>,
 ) {
     let dt = simulation_delta(&time, &state);
-    let mut order: Vec<_> = minions.iter().map(|(entity, ..)| entity).collect();
-    order.sort_by_key(|entity| entity.to_bits());
-    for entity in order {
-        let Ok((_, position, faction, mut movement)) = minions.get_mut(entity) else {
+    let mut order: Vec<_> = minions
+        .iter()
+        .map(|(entity, _, _, _, stable_id)| (stable_id.map_or(entity.to_bits(), |id| id.0), entity))
+        .collect();
+    order.sort_by_key(|(id, _)| *id);
+    for (_, entity) in order {
+        let Ok((_, position, faction, mut movement, _)) = minions.get_mut(entity) else {
             continue;
         };
         movement.retarget_in -= dt;
@@ -307,7 +348,7 @@ fn choose_targets(
                     .0
                     .distance_squared(a.position)
                     .total_cmp(&position.0.distance_squared(b.position))
-                    .then(a.entity.to_bits().cmp(&b.entity.to_bits()))
+                    .then(a.stable_id.cmp(&b.stable_id))
             })
         {
             movement.target = enemy.position;
@@ -315,14 +356,15 @@ fn choose_targets(
         }
         let destination = towers
             .iter()
-            .filter(|(_, allegiance)| allegiance.0 != faction.0)
-            .min_by(|(a, _), (b, _)| {
+            .filter(|(_, allegiance, _)| allegiance.0 != faction.0)
+            .min_by(|(a, _, tower_a), (b, _, tower_b)| {
                 position
                     .0
                     .distance_squared(a.0)
                     .total_cmp(&position.0.distance_squared(b.0))
+                    .then(tower_a.slot.cmp(&tower_b.slot))
             })
-            .map(|(position, _)| position.0)
+            .map(|(position, _, _)| position.0)
             .unwrap_or(Vec2::ZERO);
         let forward = (destination - position.0).normalize_or_zero();
         let faction_index = factions.get(faction.0).map_or(0, |f| f.index);
@@ -420,7 +462,7 @@ fn collect_damage(
                     .0
                     .distance_squared(a.position)
                     .total_cmp(&position.0.distance_squared(b.position))
-                    .then(a.entity.to_bits().cmp(&b.entity.to_bits()))
+                    .then(a.stable_id.cmp(&b.stable_id))
             });
         if let Some(target) = target {
             pending.0.entry(target.entity).or_default()[faction.1] += attack.damage;
@@ -473,11 +515,11 @@ fn check_victory(
     let Some(first) = ownership.next() else {
         return;
     };
-    if ownership.all(|owner| owner == first) {
-        if let Ok(faction) = factions.get(first.0) {
-            state.winner = Some(faction.index);
-            state.paused = true;
-        }
+    if ownership.all(|owner| owner == first)
+        && let Ok(faction) = factions.get(first.0)
+    {
+        state.winner = Some(faction.index);
+        state.paused = true;
     }
 }
 
@@ -655,6 +697,7 @@ mod tests {
                 faction: entity,
                 position: location,
                 tower: false,
+                stable_id: 0,
             });
         assert_eq!(index.nearby(Vec2::new(0.1, -7.9), 1.0).count(), 1);
         assert_eq!(index.nearby(Vec2::new(2.0, -7.9), 1.0).count(), 0);
@@ -711,5 +754,29 @@ mod tests {
                 assert!(factions.contains(&owner.0));
             }
         }
+    }
+
+    #[test]
+    fn restart_replays_seeded_movement_despite_entity_reallocation() {
+        fn snapshot(app: &mut App) -> Vec<(u64, Vec2, Vec2)> {
+            let mut result: Vec<_> = app
+                .world_mut()
+                .query::<(&SimulationId, &Position, &Movement)>()
+                .iter(app.world())
+                .map(|(id, position, movement)| (id.0, position.0, movement.target))
+                .collect();
+            result.sort_by_key(|entry| entry.0);
+            result
+        }
+        let mut app = app();
+        step(&mut app, 180);
+        let original = snapshot(&mut app);
+        assert!(!original.is_empty());
+        app.world_mut()
+            .resource_mut::<MatchState>()
+            .restart_requested = true;
+        app.world_mut().run_schedule(Update);
+        step(&mut app, 180);
+        assert_eq!(snapshot(&mut app), original);
     }
 }

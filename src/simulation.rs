@@ -35,7 +35,7 @@ impl Plugin for SimulationPlugin {
                     .run_if(simulation_running),
             )
             .add_systems(Startup, setup_match)
-            .add_systems(Update, restart_match)
+            .add_systems(PreUpdate, restart_match)
             .add_systems(
                 FixedUpdate,
                 (advance_clock, spawn_minions).chain().in_set(SimSet::Spawn),
@@ -598,7 +598,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<MatchState>()
             .restart_requested = true;
-        app.world_mut().run_schedule(Update);
+        app.world_mut().run_schedule(PreUpdate);
         assert_eq!(count::<Minion>(&mut app), 0);
         assert_eq!(count::<Tower>(&mut app), 5);
         assert_eq!(count::<Faction>(&mut app), 5);
@@ -775,7 +775,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<MatchState>()
             .restart_requested = true;
-        app.world_mut().run_schedule(Update);
+        app.world_mut().run_schedule(PreUpdate);
         step(&mut app, 180);
         assert_eq!(snapshot(&mut app), original);
     }

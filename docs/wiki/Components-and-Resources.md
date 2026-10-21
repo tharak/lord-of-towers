@@ -31,7 +31,7 @@
 |---|---|
 | `DonutVisual` | Presentation-only crown child. One per actual rawElement unit; rendered with shared Bevy `Torus` mesh. |
 | `Stack`, `StackVisual` | Reusable visual count/layout and its child primitive; used for tower health cubes and deposit donuts. |
-| `TowerBeacon` | Sphere child atop a tower stack; the attack laser starts here. |
+| `TowerBeacon` | Sphere child atop a tower stack, supporting its rawElement donut crown. |
 | `EnergyOrbVisual` | Presentation-only small sphere child. One per actual stored minion energy point. |
 | `SpectatorCamera` | Camera control target. |
 | `StatusText`, `FactionText`, `Control` | Debug HUD labels and clickable controls. |

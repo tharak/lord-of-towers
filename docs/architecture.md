@@ -10,7 +10,7 @@ SimulationPlugin configures ordered SimSet chain Spawn → Index → Target → 
 
 Use a 100×100 world, five towers on a radius-32 circle. Initial balance defaults live in SimulationConfig. Independent seeded random choices break symmetry without nondeterministic test expectations.
 
-Presentation builds a shared primitive mesh/material palette and attaches stacks, beacons, lasers, and minion visuals to live entities. Camera and UI survive match restart. No gameplay logic depends on rendered dimensions. Controls: click/touch map to issue an attack order, Space pause, 1/2/3 speed 1×/2×/4×, R restart, F3 inspector; clickable controls are also required. Browser visibility sets browser_hidden, not paused, to preserve user intent.
+Presentation builds a shared primitive mesh/material palette and attaches stacks, beacons, attack-trail breadcrumbs, and minion visuals to live entities. Camera and UI survive match restart. No gameplay logic depends on rendered dimensions. Controls: drag/touch to draw an attack path, right-click near it to erase it, Space pause, 1/2/3 speed 1×/2×/4×, R restart, F3 inspector; clickable controls are also required. Attack paths are ECS waypoints discovered through minion vision; placement does not assign a minion. Browser visibility sets browser_hidden, not paused, to preserve user intent.
 
 Inspector exposes a public `InspectorState { pub open: bool }` resource for presentation's button. Avoid browser-blocked F3 as the only entrypoint.
 

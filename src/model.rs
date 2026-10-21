@@ -3,16 +3,16 @@ use bevy::prelude::*;
 pub const FACTION_NAMES: [&str; 5] = [
     "Orthanc",
     "Minas Morgul",
-    "White Tower of Minas Tirith",
+    "Minas Tirith",
     "Barad-dur",
-    "Tower of Cirith Ungol",
+    "Cirith Ungol",
 ];
 pub const FACTION_RGB: [[u8; 3]; 5] = [
-    [230, 159, 0],
-    [0, 158, 115],
-    [86, 180, 233],
-    [213, 94, 0],
-    [204, 121, 167],
+    [245, 144, 30],
+    [30, 131, 245],
+    [144, 30, 245],
+    [11, 239, 132],
+    [239, 245, 30],
 ];
 pub fn faction_color(index: usize) -> Color {
     let [r, g, b] = FACTION_RGB[index];

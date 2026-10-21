@@ -6,7 +6,8 @@ pub struct OrdersPlugin;
 impl Plugin for OrdersPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AttackOrderRequests>()
-            .add_systems(Update, gather_pointer_orders)
+            .init_resource::<CancelAttackOrderRequests>()
+            .add_systems(Update, (gather_pointer_orders, cancel_orders).chain())
             .add_systems(
                 FixedUpdate,
                 apply_orders
@@ -26,6 +27,7 @@ fn gather_pointer_orders(
     inspector: Option<Res<InspectorState>>,
     state: Res<MatchState>,
     mut requests: ResMut<AttackOrderRequests>,
+    mut cancellations: ResMut<CancelAttackOrderRequests>,
 ) {
     if state.restart_requested
         || state.browser_hidden
@@ -49,16 +51,79 @@ fn gather_pointer_orders(
     });
     let mut points = touch_points;
     // Browsers can synthesize mouse events for touches; enqueue each gesture once.
-    if points.is_empty() && mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Left)) {
+    if points.is_empty()
+        && mouse
+            .as_ref()
+            .is_some_and(|mouse| mouse.just_pressed(MouseButton::Left))
+    {
         points.extend(window.cursor_position());
     }
-    for point in points {
+    let cancel_point = mouse
+        .as_ref()
+        .filter(|mouse| mouse.just_pressed(MouseButton::Right))
+        .and_then(|_| window.cursor_position());
+    for (point, cancel) in points
+        .into_iter()
+        .map(|point| (point, false))
+        .chain(cancel_point.map(|point| (point, true)))
+    {
         let Ok(ray) = camera.viewport_to_world(transform, point) else {
             continue;
         };
         if let Some(distance) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) {
             let point = ray.get_point(distance);
-            requests.0.push(Vec2::new(point.x, point.z));
+            let point = Vec2::new(point.x, point.z);
+            if cancel {
+                cancellations.0.push(point);
+            } else {
+                requests.0.push(point);
+            }
+        }
+    }
+}
+
+fn remove_trail(world: &mut World, entity: Entity, assigned: Entity) {
+    if world
+        .get::<AttackOrder>(assigned)
+        .is_some_and(|order| order.trail == entity)
+    {
+        world.entity_mut(assigned).remove::<AttackOrder>();
+    }
+    let _ = world.despawn(entity);
+}
+
+// Update keeps cancellation and tower-loss cleanup responsive while simulation is paused.
+fn cancel_orders(world: &mut World) {
+    let points = std::mem::take(&mut world.resource_mut::<CancelAttackOrderRequests>().0);
+    let player = world
+        .query_filtered::<Entity, (With<Tower>, With<PlayerControlled>)>()
+        .iter(world)
+        .next();
+    let invalid: Vec<_> = world
+        .query::<(Entity, &AttackTrail)>()
+        .iter(world)
+        .filter(|(_, trail)| Some(trail.tower) != player)
+        .map(|(entity, trail)| (entity, trail.assigned))
+        .collect();
+    for (entity, assigned) in invalid {
+        remove_trail(world, entity, assigned);
+    }
+    if world.resource::<MatchState>().restart_requested {
+        return;
+    }
+    let Some(player) = player else {
+        world.resource_mut::<AttackOrderRequests>().0.clear();
+        return;
+    };
+    for point in points.into_iter().filter(|point| point.is_finite()) {
+        let nearest = world
+            .query::<(Entity, &AttackTrail, &Position)>()
+            .iter(world)
+            .filter(|(_, trail, _)| trail.tower == player)
+            .min_by(|a, b| distance_key(a.2.0, point, a.0, b.2.0, b.0))
+            .map(|(entity, trail, _)| (entity, trail.assigned));
+        if let Some((entity, assigned)) = nearest {
+            remove_trail(world, entity, assigned);
         }
     }
 }
@@ -68,24 +133,36 @@ fn apply_orders(world: &mut World) {
         world.resource_mut::<AttackOrderRequests>().0.clear();
         return;
     }
+    cancel_orders(world);
     if !simulation_active(world.resource::<MatchState>()) {
         return;
     }
     let requests = std::mem::take(&mut world.resource_mut::<AttackOrderRequests>().0);
     for point in requests.into_iter().filter(|point| point.is_finite()) {
         let tower = world
-            .query_filtered::<(Entity, &Position, &Allegiance), With<Tower>>()
+            .query_filtered::<(Entity, &Position, &Allegiance), (With<Tower>, With<PlayerControlled>)>()
             .iter(world)
-            .min_by(|a, b| distance_key(a.1.0, point, a.0, b.1.0, b.0))
+            .next()
             .map(|(entity, _, allegiance)| (entity, allegiance.0));
         let Some((tower, faction)) = tower else {
             continue;
         };
-        let minion = world.query_filtered::<(Entity, &Position, &Allegiance, Option<&AttackOrder>), (With<Minion>, With<Movement>)>()
+        let minion = world
+            .query_filtered::<(
+                Entity,
+                &Position,
+                &Allegiance,
+                Option<&AttackOrder>,
+                &OriginTower,
+            ), (With<Minion>, With<Movement>)>()
             .iter(world)
-            .filter(|(_, _, allegiance, _)| allegiance.0 == faction)
-            .min_by(|a, b| a.3.is_some().cmp(&b.3.is_some()).then_with(|| distance_key(a.1.0, point, a.0, b.1.0, b.0)))
-            .map(|(entity, _, _, _)| entity);
+            .filter(|(_, _, allegiance, _, origin)| allegiance.0 == faction && origin.0 == tower)
+            .min_by(|a, b| {
+                a.3.is_some()
+                    .cmp(&b.3.is_some())
+                    .then_with(|| distance_key(a.1.0, point, a.0, b.1.0, b.0))
+            })
+            .map(|(entity, _, _, _, _)| entity);
         let Some(minion) = minion else { continue };
         let target = world.query_filtered::<(Entity, &Position, &Allegiance, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>()
             .iter(world)
@@ -214,13 +291,20 @@ mod tests {
         let mut world = World::new();
         world.init_resource::<MatchState>();
         world.init_resource::<AttackOrderRequests>();
+        world.init_resource::<CancelAttackOrderRequests>();
         let faction = world.spawn_empty().id();
         let tower = world
-            .spawn((Tower { slot: 0 }, Position(Vec2::ZERO), Allegiance(faction)))
+            .spawn((
+                Tower { slot: 0 },
+                PlayerControlled,
+                Position(Vec2::ZERO),
+                Allegiance(faction),
+            ))
             .id();
         let minion = world
             .spawn((
                 Minion,
+                OriginTower(tower),
                 Position(Vec2::ZERO),
                 Allegiance(faction),
                 Movement {
@@ -273,6 +357,81 @@ mod tests {
         assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::X * 5.0);
         world.despawn(tower);
         apply_orders(&mut world);
+        assert!(world.get::<AttackOrder>(minion).is_none());
+        assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 0);
+    }
+    #[test]
+    fn orders_only_use_player_origin_even_near_other_towers() {
+        let (mut world, faction, player, minion) = setup();
+        let other = world
+            .spawn((
+                Tower { slot: 1 },
+                Position(Vec2::X * 100.0),
+                Allegiance(faction),
+            ))
+            .id();
+        let foreign = world
+            .spawn((
+                Minion,
+                OriginTower(other),
+                Position(Vec2::X * 100.0),
+                Allegiance(faction),
+                Movement {
+                    speed: 1.0,
+                    target: Vec2::ZERO,
+                    retarget_in: 0.0,
+                },
+            ))
+            .id();
+        world
+            .resource_mut::<AttackOrderRequests>()
+            .0
+            .push(Vec2::X * 100.0);
+        apply_orders(&mut world);
+        let trail = world.get::<AttackOrder>(minion).unwrap().trail;
+        assert_eq!(world.get::<AttackTrail>(trail).unwrap().tower, player);
+        assert!(world.get::<AttackOrder>(foreign).is_none());
+        world.despawn(player);
+        world
+            .resource_mut::<AttackOrderRequests>()
+            .0
+            .push(Vec2::X * 100.0);
+        apply_orders(&mut world);
+        assert!(world.get::<AttackOrder>(minion).is_none());
+        assert!(world.get::<AttackOrder>(foreign).is_none());
+        assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 0);
+    }
+
+    #[test]
+    fn update_cancels_nearest_trail_at_any_distance_while_paused() {
+        let (world, _, _, minion) = setup();
+        let mut app = App::new();
+        *app.world_mut() = world;
+        app.add_systems(Update, cancel_orders);
+        app.world_mut()
+            .resource_mut::<AttackOrderRequests>()
+            .0
+            .push(Vec2::X * 10.0);
+        apply_orders(app.world_mut());
+        let trail = app.world().get::<AttackOrder>(minion).unwrap().trail;
+        app.world_mut().resource_mut::<MatchState>().paused = true;
+        app.world_mut()
+            .resource_mut::<CancelAttackOrderRequests>()
+            .0
+            .push(Vec2::splat(10000.0));
+        app.world_mut().run_schedule(Update);
+        assert!(app.world().get::<AttackOrder>(minion).is_none());
+        assert!(app.world().get_entity(trail).is_err());
+    }
+
+    #[test]
+    fn paused_tower_loss_removes_trails_without_fallback() {
+        let (mut world, _, tower, minion) = setup();
+        world.resource_mut::<AttackOrderRequests>().0.push(Vec2::X);
+        apply_orders(&mut world);
+        world.resource_mut::<MatchState>().paused = true;
+        world.despawn(tower);
+        cancel_orders(&mut world);
         assert!(world.get::<AttackOrder>(minion).is_none());
         assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 0);
     }

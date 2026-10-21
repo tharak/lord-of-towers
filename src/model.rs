@@ -43,6 +43,8 @@ pub enum EntityKind {
     RawElementDeposit,
     Trail,
     DonutVisual,
+    EnergyOrbVisual,
+    EnergyProjectile,
     Link,
     Battlefield,
     Camera,
@@ -97,6 +99,8 @@ pub struct SimulationConfig {
     pub initial_energy: u8,
     pub energy_capacity: u8,
     pub attack_energy_cost: u8,
+    pub projectile_speed: f32,
+    pub projectile_lifetime: f32,
     pub pickup_radius: f32,
     pub link_range: f32,
     pub energy_tick_seconds: f32,
@@ -121,6 +125,8 @@ impl Default for SimulationConfig {
             initial_energy: 5,
             energy_capacity: 5,
             attack_energy_cost: 1,
+            projectile_speed: 20.0,
+            projectile_lifetime: 1.5,
             pickup_radius: 1.0,
             link_range: 15.0,
             energy_tick_seconds: 1.0,
@@ -181,6 +187,15 @@ pub struct SimulationId(pub u64);
 pub struct EnergyStore {
     pub current: u8,
     pub capacity: u8,
+}
+
+/// A fired unit of energy. It follows a live hostile target and deals damage on impact.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct EnergyProjectile {
+    pub target: Entity,
+    pub damage: f32,
+    pub speed: f32,
+    pub remaining: f32,
 }
 
 /// Gameplay inventory: deposits, minion cargo (0..=1), or tower stock.

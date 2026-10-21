@@ -15,6 +15,9 @@ impl Plugin for PresentationPlugin {
                     button_controls,
                     attach_visuals,
                     sync_donut_visuals,
+                    sync_energy_orbs,
+                    attach_projectile_visuals,
+                    sync_projectile_visuals,
                     sync_visuals,
                     attach_resource_visuals,
                     sync_gathering_visuals,
@@ -37,12 +40,15 @@ struct VisualAssets {
     trail: Handle<Mesh>,
     donut: Handle<Mesh>,
     link: Handle<Mesh>,
+    energy: Handle<Mesh>,
     raw: Handle<StandardMaterial>,
     trail_materials: Vec<Vec<Handle<StandardMaterial>>>,
     materials: Vec<Handle<StandardMaterial>>,
 }
 #[derive(Component)]
 struct DonutVisual;
+#[derive(Component)]
+struct EnergyOrbVisual;
 const TRAIL_BUCKETS: usize = 8;
 
 #[derive(Component)]
@@ -115,6 +121,7 @@ fn setup(
         trail: meshes.add(Cylinder::new(0.32, 0.08)),
         donut: meshes.add(Torus::default()),
         link: meshes.add(Cuboid::default()),
+        energy: meshes.add(Sphere::new(0.2)),
         raw: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 1.0, 0.8),
             unlit: true,
@@ -350,6 +357,86 @@ fn sync_donut_visuals(world: &mut World) {
         }
     }
 }
+// Keep energy separate from the raw-element crown, in rings around the body.
+fn energy_orb_transform(index: usize) -> Transform {
+    let angle = (index % 8) as f32 * std::f32::consts::TAU / 8.0;
+    Transform::from_xyz(
+        angle.cos() * 0.95,
+        0.15 + (index / 8) as f32 * 0.45,
+        angle.sin() * 0.95,
+    )
+}
+
+fn sync_energy_orbs(world: &mut World) {
+    let mesh = world.resource::<VisualAssets>().energy.clone();
+    let inventories: Vec<_> = world
+        .query_filtered::<(Entity, &EnergyStore, &Allegiance), With<Minion>>()
+        .iter(world)
+        .map(|(entity, store, allegiance)| (entity, usize::from(store.current), allegiance.0))
+        .collect();
+    for (parent, count, faction_entity) in inventories {
+        let Some(faction) = world.get::<Faction>(faction_entity) else {
+            continue;
+        };
+        let material = world.resource::<VisualAssets>().materials[faction.index].clone();
+        let mut children: Vec<_> = world
+            .get::<Children>(parent)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| world.get::<EnergyOrbVisual>(*child).is_some())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let retained = count.min(children.len());
+        for child in children.drain(retained..) {
+            world.despawn(child);
+        }
+        for (index, child) in children.iter().enumerate() {
+            world.entity_mut(*child).insert((
+                energy_orb_transform(index),
+                MeshMaterial3d(material.clone()),
+            ));
+        }
+        for index in children.len()..count {
+            world.spawn((
+                Name::new(format!("Stored energy sphere {}", index + 1)),
+                EntityKind::EnergyOrbVisual,
+                EnergyOrbVisual,
+                ChildOf(parent),
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                energy_orb_transform(index),
+            ));
+        }
+    }
+}
+
+fn attach_projectile_visuals(
+    mut commands: Commands,
+    assets: Res<VisualAssets>,
+    factions: Query<&Faction>,
+    projectiles: Query<(Entity, &Allegiance), (With<EnergyProjectile>, Without<Mesh3d>)>,
+) {
+    for (entity, allegiance) in &projectiles {
+        if let Ok(faction) = factions.get(allegiance.0) {
+            commands.entity(entity).insert((
+                Mesh3d(assets.energy.clone()),
+                MeshMaterial3d(assets.materials[faction.index].clone()),
+                Transform::default(),
+            ));
+        }
+    }
+}
+
+fn sync_projectile_visuals(
+    mut projectiles: Query<(&Position, &mut Transform), With<EnergyProjectile>>,
+) {
+    for (position, mut transform) in &mut projectiles {
+        transform.translation = Vec3::new(position.0.x, 1.0, position.0.y);
+    }
+}
+
 fn sync_visuals(
     assets: Res<VisualAssets>,
     factions: Query<&Faction>,
@@ -652,6 +739,8 @@ fn browser_state(
     links: Query<(), With<Link>>,
     stores: Query<&EnergyStore, With<Minion>>,
     clock: Res<EnergyClock>,
+    energy_orbs: Query<(), With<EnergyOrbVisual>>,
+    projectiles: Query<(), With<EnergyProjectile>>,
 ) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -709,6 +798,11 @@ fn browser_state(
                     .to_string(),
             ),
             ("data-energy-pulses", clock.pulses.to_string()),
+            ("data-energy-orbs", energy_orbs.iter().count().to_string()),
+            (
+                "data-energy-projectiles",
+                projectiles.iter().count().to_string(),
+            ),
         ] {
             let _ = status.set_attribute(key, &value);
         }
@@ -805,6 +899,7 @@ mod tests {
             trail: meshes.add(Cylinder::default()),
             donut: meshes.add(Torus::default()),
             link: meshes.add(Cuboid::default()),
+            energy: meshes.add(Sphere::new(0.2)),
             raw: raw.clone(),
             trail_materials: fades.clone(),
             materials: palette.clone(),
@@ -815,6 +910,9 @@ mod tests {
             (
                 attach_visuals,
                 sync_donut_visuals,
+                sync_energy_orbs,
+                attach_projectile_visuals,
+                sync_projectile_visuals,
                 sync_visuals,
                 attach_resource_visuals,
                 sync_gathering_visuals,
@@ -826,7 +924,16 @@ mod tests {
         let enemy = app.world_mut().spawn(Faction { index: 1 }).id();
         let minion = app
             .world_mut()
-            .spawn((Minion, Position(Vec2::ZERO), Allegiance(own), RawElement(0)))
+            .spawn((
+                Minion,
+                Position(Vec2::ZERO),
+                Allegiance(own),
+                RawElement(0),
+                EnergyStore {
+                    current: 3,
+                    capacity: 5,
+                },
+            ))
             .id();
         let tower = app
             .world_mut()
@@ -864,7 +971,70 @@ mod tests {
                 Allegiance(own),
             ))
             .id();
+        let projectile = app
+            .world_mut()
+            .spawn((
+                Name::new("Energy projectile"),
+                EntityKind::EnergyProjectile,
+                MatchEntity,
+                EnergyProjectile {
+                    target: minion,
+                    damage: 1.0,
+                    speed: 10.0,
+                    remaining: 5.0,
+                },
+                Allegiance(enemy),
+                Position(Vec2::new(4.0, 8.0)),
+            ))
+            .id();
         app.world_mut().run_schedule(Update);
+        assert_eq!(
+            app.world()
+                .get::<Transform>(projectile)
+                .unwrap()
+                .translation,
+            Vec3::new(4.0, 1.0, 8.0)
+        );
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(projectile)
+                .unwrap()
+                .0,
+            palette[1]
+        );
+        assert!(app.world().get::<ChildOf>(projectile).is_none());
+        app.world_mut().get_mut::<Position>(projectile).unwrap().0 = Vec2::new(9.0, 2.0);
+        app.world_mut().run_schedule(Update);
+        assert_eq!(
+            app.world()
+                .get::<Transform>(projectile)
+                .unwrap()
+                .translation,
+            Vec3::new(9.0, 1.0, 2.0)
+        );
+        app.world_mut().despawn(projectile);
+        let orbs = |world: &mut World| -> Vec<Entity> {
+            world
+                .query_filtered::<Entity, With<EnergyOrbVisual>>()
+                .iter(world)
+                .collect()
+        };
+        let initial_orbs = orbs(app.world_mut());
+        assert_eq!(initial_orbs.len(), 3);
+        for orb in &initial_orbs {
+            assert_eq!(
+                *app.world().get::<EntityKind>(*orb).unwrap(),
+                EntityKind::EnergyOrbVisual
+            );
+            assert_eq!(app.world().get::<ChildOf>(*orb).unwrap().parent(), minion);
+            assert!(app.world().get::<Name>(*orb).is_some());
+        }
+        app.world_mut()
+            .get_mut::<EnergyStore>(minion)
+            .unwrap()
+            .current = 1;
+        app.world_mut().run_schedule(Update);
+        assert_eq!(orbs(app.world_mut()).len(), 1);
         assert_eq!(donuts(app.world_mut(), minion).len(), 0);
         let crown = donuts(app.world_mut(), tower);
         assert_eq!(crown.len(), 9);
@@ -936,7 +1106,13 @@ mod tests {
         app.world_mut().run_schedule(Update);
         let carried = donuts(app.world_mut(), minion);
         assert_eq!(carried.len(), 17);
+        let remaining_orbs = orbs(app.world_mut());
         app.world_mut().despawn(minion);
+        assert!(
+            remaining_orbs
+                .iter()
+                .all(|orb| app.world().get_entity(*orb).is_err())
+        );
         app.world_mut().run_schedule(Update);
         assert!(
             carried

@@ -16,8 +16,8 @@ impl Plugin for PresentationPlugin {
                     browser_state,
                     attach_visuals,
                     sync_visuals,
-                    attach_energy_visuals,
-                    sync_pickup_visuals,
+                    attach_resource_visuals,
+                    sync_gathering_visuals,
                     sync_link_visuals,
                     ground_colors,
                     update_hud,
@@ -32,12 +32,18 @@ struct VisualAssets {
     tower: Handle<Mesh>,
     minion: Handle<Mesh>,
     ground: Handle<Mesh>,
-    pickup: Handle<Mesh>,
+    deposit: Handle<Mesh>,
+    trail: Handle<Mesh>,
+    cargo: Handle<Mesh>,
     link: Handle<Mesh>,
-    charged: Handle<StandardMaterial>,
-    depleted: Handle<StandardMaterial>,
+    raw: Handle<StandardMaterial>,
+    trail_materials: Vec<Vec<Handle<StandardMaterial>>>,
     materials: Vec<Handle<StandardMaterial>>,
 }
+#[derive(Component)]
+struct CargoVisual;
+const TRAIL_BUCKETS: usize = 8;
+
 #[derive(Component)]
 struct SpectatorCamera;
 #[derive(Component)]
@@ -85,22 +91,35 @@ fn setup(
             ..default()
         })),
     ));
+    let trail_materials = (0..5)
+        .map(|faction| {
+            (0..TRAIL_BUCKETS)
+                .map(|bucket| {
+                    materials.add(StandardMaterial {
+                        base_color: faction_color(faction)
+                            .with_alpha((bucket + 1) as f32 / TRAIL_BUCKETS as f32 * 0.8),
+                        alpha_mode: AlphaMode::Blend,
+                        unlit: true,
+                        ..default()
+                    })
+                })
+                .collect()
+        })
+        .collect();
     commands.insert_resource(VisualAssets {
         tower,
         minion,
         ground,
-        pickup: meshes.add(Torus::default()),
+        deposit: meshes.add(Torus::default()),
+        trail: meshes.add(Cylinder::new(0.32, 0.08)),
+        cargo: meshes.add(Cuboid::new(0.55, 0.55, 0.55)),
         link: meshes.add(Cuboid::default()),
-        charged: materials.add(StandardMaterial {
+        raw: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 1.0, 0.8),
             unlit: true,
             ..default()
         }),
-        depleted: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.18, 0.21, 0.2),
-            unlit: true,
-            ..default()
-        }),
+        trail_materials,
         materials: palette,
     });
     commands.spawn((
@@ -272,6 +291,19 @@ fn attach_visuals(
                 MeshMaterial3d(assets.materials[faction.index].clone()),
                 Transform::default(),
             ));
+            if tower.is_none() {
+                commands.entity(entity).with_children(|parent| {
+                    parent.spawn((
+                        Name::new("Carried rawElement"),
+                        EntityKind::CargoVisual,
+                        CargoVisual,
+                        Mesh3d(assets.cargo.clone()),
+                        MeshMaterial3d(assets.raw.clone()),
+                        Transform::from_xyz(0.0, 1.0, 0.0),
+                        Visibility::Hidden,
+                    ));
+                });
+            }
         }
     }
 }
@@ -303,19 +335,29 @@ fn sync_visuals(
         }
     }
 }
-fn attach_energy_visuals(
+fn attach_resource_visuals(
     mut commands: Commands,
     assets: Res<VisualAssets>,
-    pickups: Query<Entity, (With<EnergyPickup>, Without<Mesh3d>)>,
+    deposits: Query<Entity, (With<RawElementDeposit>, Without<Mesh3d>)>,
+    trails: Query<(Entity, &Allegiance), (With<Trail>, Without<Mesh3d>)>,
     links: Query<(Entity, &Allegiance), (With<Link>, Without<Mesh3d>)>,
     factions: Query<&Faction>,
 ) {
-    for entity in &pickups {
+    for entity in &deposits {
         commands.entity(entity).insert((
-            Mesh3d(assets.pickup.clone()),
-            MeshMaterial3d(assets.charged.clone()),
+            Mesh3d(assets.deposit.clone()),
+            MeshMaterial3d(assets.raw.clone()),
             Transform::default(),
         ));
+    }
+    for (entity, allegiance) in &trails {
+        if let Ok(faction) = factions.get(allegiance.0) {
+            commands.entity(entity).insert((
+                Mesh3d(assets.trail.clone()),
+                MeshMaterial3d(assets.trail_materials[faction.index][TRAIL_BUCKETS - 1].clone()),
+                Transform::default(),
+            ));
+        }
     }
     for (entity, allegiance) in &links {
         if let Ok(faction) = factions.get(allegiance.0) {
@@ -328,26 +370,48 @@ fn attach_energy_visuals(
         }
     }
 }
-fn sync_pickup_visuals(
+fn trail_bucket(remaining: f32, lifetime: f32) -> usize {
+    ((remaining / lifetime.max(f32::EPSILON)).clamp(0.0, 1.0) * TRAIL_BUCKETS as f32)
+        .ceil()
+        .max(1.0) as usize
+        - 1
+}
+fn sync_gathering_visuals(
     assets: Res<VisualAssets>,
-    mut pickups: Query<(
-        &Position,
-        &EnergyPickup,
-        &mut Transform,
-        &mut MeshMaterial3d<StandardMaterial>,
-    )>,
+    config: Res<SimulationConfig>,
+    factions: Query<&Faction>,
+    mut deposits: Query<(&Position, &mut Transform), (With<RawElementDeposit>, Without<Trail>)>,
+    mut trails: Query<
+        (
+            &Position,
+            &Trail,
+            &Allegiance,
+            &mut Transform,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        (Without<RawElementDeposit>, Without<CargoVisual>),
+    >,
+    carriers: Query<&RawElement, With<Minion>>,
+    mut cargo: Query<(&ChildOf, &mut Visibility), With<CargoVisual>>,
 ) {
-    for (position, pickup, mut transform, mut material) in &mut pickups {
+    for (position, mut transform) in &mut deposits {
         transform.translation = Vec3::new(position.0.x, 0.35, position.0.y);
         transform.scale = Vec3::splat(0.55);
-        let handle = if pickup.available {
-            &assets.charged
-        } else {
-            &assets.depleted
-        };
-        if material.0 != *handle {
-            material.0 = handle.clone();
+    }
+    for (position, trail, allegiance, mut transform, mut material) in &mut trails {
+        transform.translation = Vec3::new(position.0.x, 0.1, position.0.y);
+        if let Ok(faction) = factions.get(allegiance.0) {
+            material.0 = assets.trail_materials[faction.index]
+                [trail_bucket(trail.remaining, config.trail_lifetime)]
+            .clone();
         }
+    }
+    for (parent, mut visibility) in &mut cargo {
+        *visibility = if carriers.get(parent.parent()).is_ok_and(|raw| raw.0 > 0) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 // Stretch a unit cuboid along local X. Gameplay endpoints remain independent of mesh size.
@@ -500,15 +564,20 @@ fn update_hud(
     state: Res<MatchState>,
     field: Res<InfluenceField>,
     factions: Query<&Faction>,
-    units: Query<(&Allegiance, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>,
+    units: Query<
+        (&Allegiance, Option<&Tower>, Option<&RawElement>),
+        Or<(With<Tower>, With<Minion>)>,
+    >,
     mut texts: Query<(&mut Text, Option<&FactionText>), Or<(With<StatusText>, With<FactionText>)>>,
 ) {
     let mut towers = [0; 5];
     let mut minions = [0; 5];
-    for (allegiance, tower) in &units {
+    let mut stock = [0; 5];
+    for (allegiance, tower, raw) in &units {
         if let Ok(faction) = factions.get(allegiance.0) {
             if tower.is_some() {
                 towers[faction.index] += 1;
+                stock[faction.index] += raw.map_or(0, |raw| raw.0);
             } else {
                 minions[faction.index] += 1;
             }
@@ -518,8 +587,8 @@ fn update_hud(
     for (mut text, faction) in &mut texts {
         text.0 = if let Some(FactionText(i)) = faction {
             format!(
-                "{}  |  {} towers | {} minions | {:.0}%",
-                FACTION_NAMES[*i], towers[*i], minions[*i], territory[*i]
+                "{}  |  {} towers | {} minions | rawElement {} | {:.0}%",
+                FACTION_NAMES[*i], towers[*i], minions[*i], stock[*i], territory[*i]
             )
         } else if let Some(winner) = state.winner {
             format!("{} wins! Restart to play again.", FACTION_NAMES[winner])
@@ -541,7 +610,10 @@ fn browser_state(
     inspector: Res<InspectorState>,
     minions: Query<(), With<Minion>>,
     towers: Query<(), With<Tower>>,
-    pickups: Query<&EnergyPickup>,
+    deposits: Query<&RawElement, With<RawElementDeposit>>,
+    inventories: Query<(&RawElement, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>,
+    trails: Query<(), With<Trail>>,
+    economy: Res<RawElementEconomy>,
     links: Query<(), With<Link>>,
     stores: Query<&EnergyStore, With<Minion>>,
     clock: Res<EnergyClock>,
@@ -561,15 +633,36 @@ fn browser_state(
             ("data-speed", state.speed.to_string()),
             ("data-elapsed", state.elapsed.to_string()),
             ("data-inspector", inspector.open.to_string()),
-            ("data-energy-pickups", pickups.iter().count().to_string()),
+            ("data-raw-deposits", deposits.iter().count().to_string()),
             (
-                "data-charged-pickups",
-                pickups
+                "data-raw-remaining",
+                deposits
                     .iter()
-                    .filter(|pickup| pickup.available)
-                    .count()
+                    .map(|raw| u64::from(raw.0))
+                    .sum::<u64>()
                     .to_string(),
             ),
+            (
+                "data-raw-carried",
+                inventories
+                    .iter()
+                    .filter(|(_, tower)| tower.is_none())
+                    .map(|(raw, _)| u64::from(raw.0))
+                    .sum::<u64>()
+                    .to_string(),
+            ),
+            (
+                "data-raw-stock",
+                inventories
+                    .iter()
+                    .filter(|(_, tower)| tower.is_some())
+                    .map(|(raw, _)| u64::from(raw.0))
+                    .sum::<u64>()
+                    .to_string(),
+            ),
+            ("data-raw-spent", economy.spent.to_string()),
+            ("data-raw-initial", economy.initial.to_string()),
+            ("data-trails", trails.iter().count().to_string()),
             ("data-links", links.iter().count().to_string()),
             (
                 "data-total-minion-energy",
@@ -625,56 +718,76 @@ mod tests {
     }
 
     #[test]
-    fn units_share_faction_materials_and_capture_recolors_only_the_tower() {
+    fn trail_fade_uses_bounded_buckets() {
+        assert_eq!(trail_bucket(30.0, 30.0), TRAIL_BUCKETS - 1);
+        assert_eq!(trail_bucket(15.0, 30.0), 3);
+        assert_eq!(trail_bucket(0.0, 30.0), 0);
+        assert_eq!(trail_bucket(100.0, 30.0), TRAIL_BUCKETS - 1);
+    }
+    #[test]
+    fn gathering_visuals_share_assets_follow_cargo_and_despawn_with_parent() {
         let mut app = App::new();
         let mut meshes = Assets::<Mesh>::default();
         let mut materials = Assets::<StandardMaterial>::default();
+        let raw = materials.add(StandardMaterial::from(Color::WHITE));
         let palette: Vec<_> = (0..5)
-            .map(|index| materials.add(StandardMaterial::from(faction_color(index))))
+            .map(|i| materials.add(StandardMaterial::from(faction_color(i))))
+            .collect();
+        let fades: Vec<Vec<_>> = (0..5)
+            .map(|_| {
+                (0..TRAIL_BUCKETS)
+                    .map(|_| materials.add(StandardMaterial::default()))
+                    .collect()
+            })
             .collect();
         app.insert_resource(VisualAssets {
-            tower: meshes.add(Cuboid::new(3.0, 7.0, 3.0)),
-            minion: meshes.add(Capsule3d::new(0.42, 0.7)),
-            ground: meshes.add(Plane3d::default().mesh().size(100.0, 100.0)),
-            pickup: meshes.add(Torus::default()),
+            tower: meshes.add(Cuboid::default()),
+            minion: meshes.add(Capsule3d::default()),
+            ground: meshes.add(Plane3d::default()),
+            deposit: meshes.add(Torus::default()),
+            trail: meshes.add(Cylinder::default()),
+            cargo: meshes.add(Cuboid::default()),
             link: meshes.add(Cuboid::default()),
-            charged: materials.add(StandardMaterial::from(Color::WHITE)),
-            depleted: materials.add(StandardMaterial::from(Color::BLACK)),
+            raw: raw.clone(),
+            trail_materials: fades.clone(),
             materials: palette.clone(),
         });
+        app.init_resource::<SimulationConfig>();
         app.add_systems(
             Update,
             (
                 attach_visuals,
                 sync_visuals,
-                attach_energy_visuals,
-                sync_pickup_visuals,
+                attach_resource_visuals,
+                sync_gathering_visuals,
                 sync_link_visuals,
             )
                 .chain(),
         );
-        let original = app.world_mut().spawn(Faction { index: 0 }).id();
-        let conqueror = app.world_mut().spawn(Faction { index: 1 }).id();
-        let tower = app
-            .world_mut()
-            .spawn((
-                Tower { slot: 0 },
-                Allegiance(original),
-                Position(Vec2::ZERO),
-            ))
-            .id();
+        let own = app.world_mut().spawn(Faction { index: 0 }).id();
+        let enemy = app.world_mut().spawn(Faction { index: 1 }).id();
         let minion = app
             .world_mut()
-            .spawn((Minion, Allegiance(original), Position(Vec2::new(2.0, 3.0))))
+            .spawn((Minion, Position(Vec2::ZERO), Allegiance(own), RawElement(0)))
             .id();
-        let pickup = app
+        let tower = app
+            .world_mut()
+            .spawn((Tower { slot: 0 }, Position(Vec2::X * 2.0), Allegiance(own)))
+            .id();
+        let deposit = app
+            .world_mut()
+            .spawn((RawElementDeposit, Position(Vec2::X * 3.0), RawElement(5)))
+            .id();
+        let trail = app
             .world_mut()
             .spawn((
-                EnergyPickup {
-                    available: true,
-                    recharge_remaining: 0.0,
+                Trail {
+                    trip: 0,
+                    sequence: 0,
+                    remaining: 15.0,
                 },
-                Position(Vec2::new(8.0, 4.0)),
+                Position(Vec2::X),
+                Allegiance(own),
             ))
             .id();
         let link = app
@@ -684,44 +797,40 @@ mod tests {
                     source: tower,
                     target: minion,
                 },
-                Allegiance(original),
+                Allegiance(own),
             ))
             .id();
         app.world_mut().run_schedule(Update);
-        let charged = app.world().resource::<VisualAssets>().charged.clone();
-        let depleted = app.world().resource::<VisualAssets>().depleted.clone();
+        let cargo = app
+            .world_mut()
+            .query_filtered::<Entity, With<CargoVisual>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            *app.world().get::<Visibility>(cargo).unwrap(),
+            Visibility::Hidden
+        );
         assert_eq!(
             app.world()
-                .get::<MeshMaterial3d<StandardMaterial>>(pickup)
+                .get::<MeshMaterial3d<StandardMaterial>>(deposit)
                 .unwrap()
                 .0,
-            charged
+            raw
         );
         assert_eq!(
-            app.world().get::<Mesh3d>(pickup).unwrap().0,
-            app.world().resource::<VisualAssets>().pickup
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(trail)
+                .unwrap()
+                .0,
+            fades[0][3]
         );
+        app.world_mut().get_mut::<RawElement>(minion).unwrap().0 = 1;
+        app.world_mut().entity_mut(tower).insert(Allegiance(enemy));
+        app.world_mut().run_schedule(Update);
         assert_eq!(
-            *app.world().get::<Visibility>(link).unwrap(),
+            *app.world().get::<Visibility>(cargo).unwrap(),
             Visibility::Inherited
         );
-        app.world_mut()
-            .get_mut::<EnergyPickup>(pickup)
-            .unwrap()
-            .available = false;
-        for entity in [tower, minion] {
-            assert_eq!(
-                app.world()
-                    .get::<MeshMaterial3d<StandardMaterial>>(entity)
-                    .unwrap()
-                    .0,
-                palette[0]
-            );
-        }
-        app.world_mut()
-            .entity_mut(tower)
-            .insert(Allegiance(conqueror));
-        app.world_mut().run_schedule(Update);
         assert_eq!(
             app.world()
                 .get::<MeshMaterial3d<StandardMaterial>>(tower)
@@ -736,23 +845,9 @@ mod tests {
                 .0,
             palette[0]
         );
-        assert_eq!(
-            app.world().get::<Position>(minion).unwrap().0,
-            Vec2::new(2.0, 3.0)
-        );
-        assert_eq!(
-            app.world()
-                .get::<MeshMaterial3d<StandardMaterial>>(pickup)
-                .unwrap()
-                .0,
-            depleted
-        );
-        assert_eq!(
-            app.world().get::<Transform>(pickup).unwrap().translation.y,
-            0.35
-        );
         app.world_mut().despawn(minion);
         app.world_mut().run_schedule(Update);
+        assert!(app.world().get_entity(cargo).is_err());
         assert_eq!(
             *app.world().get::<Visibility>(link).unwrap(),
             Visibility::Hidden

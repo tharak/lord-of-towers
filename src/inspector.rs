@@ -1,7 +1,7 @@
 //! A bounded view into the live ECS world, never an entity registry.
 use crate::model::{
-    Allegiance, EnergyPickup, EnergyStore, EntityKind, FACTION_NAMES, Faction, Link,
-    SupplyConnection,
+    Allegiance, EnergyStore, EntityKind, FACTION_NAMES, Faction, GatheringState, Link, RawElement,
+    SupplyConnection, Trail, Vision,
 };
 use bevy::prelude::*;
 use std::fmt::Write;
@@ -42,11 +42,13 @@ enum InspectorAction {
     Components,
     Close,
 }
-const KINDS: [EntityKind; 9] = [
+const KINDS: [EntityKind; 11] = [
     EntityKind::Faction,
     EntityKind::Tower,
     EntityKind::Minion,
-    EntityKind::EnergyPickup,
+    EntityKind::RawElementDeposit,
+    EntityKind::Trail,
+    EntityKind::CargoVisual,
     EntityKind::Link,
     EntityKind::Battlefield,
     EntityKind::Camera,
@@ -231,16 +233,20 @@ fn append_energy_details(text: &mut String, entity: &EntityRef) {
     if let Some(store) = entity.get::<EnergyStore>() {
         let _ = writeln!(text, "Energy: {}/{}", store.current, store.capacity);
     }
-    if let Some(pickup) = entity.get::<EnergyPickup>() {
+    if let Some(raw) = entity.get::<RawElement>() {
+        let _ = writeln!(text, "rawElement: {}", raw.0);
+    }
+    if let Some(vision) = entity.get::<Vision>() {
+        let _ = writeln!(text, "Vision: {:.1}", vision.radius);
+    }
+    if let Some(state) = entity.get::<GatheringState>() {
+        let _ = writeln!(text, "Gathering: {state:?}");
+    }
+    if let Some(trail) = entity.get::<Trail>() {
         let _ = writeln!(
             text,
-            "Pickup: {} | recharge {:.1}s",
-            if pickup.available {
-                "charged"
-            } else {
-                "depleted"
-            },
-            pickup.recharge_remaining
+            "Trail: trip {} | sequence {} | {:.1}s remaining",
+            trail.trip, trail.sequence, trail.remaining
         );
     }
     if let Some(connection) = entity.get::<SupplyConnection>() {
@@ -346,46 +352,43 @@ fn refresh(world: &mut World) {
 mod tests {
     use super::*;
     #[test]
-    fn energy_filters_and_details_read_live_component_values() {
+    fn resource_details_read_live_component_values() {
         let mut world = World::new();
-        let root = world.spawn_empty().id();
-        let pickup = world
-            .spawn((
-                EntityKind::EnergyPickup,
-                EnergyPickup {
-                    available: false,
-                    recharge_remaining: 2.5,
-                },
-            ))
+        let deposit = world
+            .spawn((EntityKind::RawElementDeposit, RawElement(7)))
             .id();
         let minion = world
             .spawn((
+                RawElement(1),
+                Vision { radius: 15.0 },
+                GatheringState::Returning { tower: None },
                 EnergyStore {
-                    current: 2,
+                    current: 0,
                     capacity: 5,
                 },
-                SupplyConnection { parent: root, root },
             ))
             .id();
-        let link = world
+        let trail = world
             .spawn((
-                EntityKind::Link,
-                Link {
-                    source: root,
-                    target: minion,
+                EntityKind::Trail,
+                Trail {
+                    trip: 9,
+                    sequence: 2,
+                    remaining: 12.5,
                 },
             ))
             .id();
-        assert_eq!(matching_entities(&mut world, 4, 0, false).1, vec![pickup]);
-        assert_eq!(matching_entities(&mut world, 5, 0, false).1, vec![link]);
+        assert_eq!(matching_entities(&mut world, 4, 0, false).1, vec![deposit]);
+        assert_eq!(matching_entities(&mut world, 5, 0, false).1, vec![trail]);
         let mut details = String::new();
-        for id in [pickup, minion, link] {
+        for id in [deposit, minion, trail] {
             append_energy_details(&mut details, &world.entity(id));
         }
-        assert!(details.contains("Energy: 2/5"));
-        assert!(details.contains("depleted | recharge 2.5s"));
-        assert!(details.contains(&format!("Supply parent: {root:?} | root: {root:?}")));
-        assert!(details.contains(&format!("Link: {root:?} -> {minion:?}")));
+        assert!(details.contains("rawElement: 7"));
+        assert!(details.contains("Vision: 15.0"));
+        assert!(details.contains("Gathering: Returning"));
+        assert!(details.contains("sequence 2 | 12.5s remaining"));
+        assert!(details.contains("Energy: 0/5"));
     }
 
     #[test]

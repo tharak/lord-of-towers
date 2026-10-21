@@ -923,6 +923,9 @@ fn browser_state(
     clock: Res<EnergyClock>,
     energy_orbs: Query<(), With<EnergyOrbVisual>>,
     projectiles: Query<(), With<EnergyProjectile>>,
+    attack_trails: Query<(), With<AttackTrail>>,
+    stack_pieces: Query<(), With<StackPiece>>,
+    beacons: Query<(), With<TowerBeacon>>,
 ) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -981,6 +984,12 @@ fn browser_state(
             ),
             ("data-energy-pulses", clock.pulses.to_string()),
             ("data-energy-orbs", energy_orbs.iter().count().to_string()),
+            (
+                "data-attack-trails",
+                attack_trails.iter().count().to_string(),
+            ),
+            ("data-stack-pieces", stack_pieces.iter().count().to_string()),
+            ("data-tower-beacons", beacons.iter().count().to_string()),
             (
                 "data-energy-projectiles",
                 projectiles.iter().count().to_string(),

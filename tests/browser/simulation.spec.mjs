@@ -18,11 +18,15 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await expect(page.locator('#error')).toBeHidden();
   await expect(status).toHaveAttribute('data-towers', '5');
   await expect(status).toHaveAttribute('data-raw-deposits', '30');
+  await expect(status).toHaveAttribute('data-tower-beacons', '5');
   await expect.poll(async () => Number(await status.getAttribute('data-minions'))).toBeGreaterThanOrEqual(15);
+  await expect.poll(async () => Number(await status.getAttribute('data-stack-pieces'))).toBeGreaterThan(150);
   const initialRaw = Number(await status.getAttribute('data-raw-initial'));
   expect(initialRaw).toBeGreaterThanOrEqual(150);
   expect(initialRaw).toBeLessThanOrEqual(300);
   await expect.poll(async () => Number(await status.getAttribute('data-links'))).toBeGreaterThan(0);
+  await page.mouse.click(720, 450);
+  await expect.poll(async () => Number(await status.getAttribute('data-attack-trails'))).toBe(1);
   await page.locator('#game').focus();
   await page.keyboard.press('Space');
   await expect(status).toHaveAttribute('data-paused', 'true');
@@ -73,6 +77,8 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await expect(status).toHaveAttribute('data-raw-spent', '0');
   await expect(status).toHaveAttribute('data-trails', '0');
   await expect(status).toHaveAttribute('data-donut-visuals', '0');
+  await expect(status).toHaveAttribute('data-attack-trails', '0');
+  await expect(status).toHaveAttribute('data-tower-beacons', '5');
   await expect(status).toHaveAttribute('data-energy-orbs', '75');
   await expect(status).toHaveAttribute('data-energy-projectiles', '0');
   await expect(status).toHaveAttribute('data-raw-remaining', String(initialRaw));

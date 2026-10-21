@@ -47,6 +47,8 @@
 | `SimulationConfig` | Default world size, seed, vision, gathering, combat, spawning, trail and energy tuning. |
 | `AttackOrderRequests` | Pending screen-to-world mouse/touch paths consumed by the next simulation step. |
 | `CancelAttackOrderRequests` | Pending right-click ground points used to remove the whole player path when a marker is within two world units. |
+| `AttackPathIds` | Monotonic path ID sequence, grouping attack-trail marker entities into complete strokes. |
+| `DrawingAttackPath` | In-progress mouse or touch stroke and its sampled world points, committed as one path on release. |
 | `MatchState` | Pause, speed, hidden-tab, elapsed time, winner and restart request. |
 | `FactionEntities` | Five live faction entity IDs for deterministic ownership lookup. |
 | `RawElementEconomy` | Initial resource total and cumulative spending; verifies that live deposits, cargo and stock plus spending equal the initial total. |

@@ -31,6 +31,8 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await page.locator('#game').focus();
   await page.keyboard.press('Space');
   await expect(status).toHaveAttribute('data-paused', 'true');
+  await page.mouse.click(1100, 450, { button: 'right' });
+  await expect(status).toHaveAttribute('data-attack-trails', '1');
   await page.mouse.click(720, 450, { button: 'right' });
   await expect(status).toHaveAttribute('data-attack-trails', '0');
   const elapsed = Number(await status.getAttribute('data-elapsed'));

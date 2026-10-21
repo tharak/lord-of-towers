@@ -2,6 +2,8 @@
 use crate::{inspector::InspectorState, model::*};
 use bevy::{prelude::*, window::PrimaryWindow};
 
+const ATTACK_TRAIL_CANCEL_RADIUS: f32 = 2.0;
+
 pub struct OrdersPlugin;
 impl Plugin for OrdersPlugin {
     fn build(&self, app: &mut App) {
@@ -119,7 +121,11 @@ fn cancel_orders(world: &mut World) {
         let nearest = world
             .query::<(Entity, &AttackTrail, &Position)>()
             .iter(world)
-            .filter(|(_, trail, _)| trail.tower == player)
+            .filter(|(_, trail, position)| {
+                trail.tower == player
+                    && position.0.distance_squared(point)
+                        <= ATTACK_TRAIL_CANCEL_RADIUS * ATTACK_TRAIL_CANCEL_RADIUS
+            })
             .min_by(|a, b| distance_key(a.2.0, point, a.0, b.2.0, b.0))
             .map(|(entity, trail, _)| (entity, trail.assigned));
         if let Some((entity, assigned)) = nearest {
@@ -403,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn cancels_nearest_trail_at_any_distance_while_paused() {
+    fn cancels_nearest_trail_only_when_clicked_near_while_paused() {
         let (mut world, faction, tower, minion) = setup();
         let other_minion = world
             .spawn((
@@ -426,7 +432,7 @@ mod tests {
         world
             .resource_mut::<AttackOrderRequests>()
             .0
-            .push(Vec2::X * 20.0);
+            .push(Vec2::X * 4.0);
         apply_orders(&mut world);
         let first_trail = world.get::<AttackOrder>(minion).unwrap().trail;
         let nearest_trail = world.get::<AttackOrder>(other_minion).unwrap().trail;
@@ -435,6 +441,16 @@ mod tests {
             .resource_mut::<CancelAttackOrderRequests>()
             .0
             .push(Vec2::X * 10000.0);
+        cancel_orders(&mut world);
+        assert_eq!(world.get::<AttackOrder>(minion).unwrap().trail, first_trail);
+        assert_eq!(
+            world.get::<AttackOrder>(other_minion).unwrap().trail,
+            nearest_trail
+        );
+        world
+            .resource_mut::<CancelAttackOrderRequests>()
+            .0
+            .push(Vec2::X * 3.5);
         cancel_orders(&mut world);
         assert_eq!(world.get::<AttackOrder>(minion).unwrap().trail, first_trail);
         assert!(world.get::<AttackOrder>(other_minion).is_none());

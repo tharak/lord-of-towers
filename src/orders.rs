@@ -96,10 +96,10 @@ fn gather_pointer_orders(
             finished = mouse.is_none_or(|mouse| mouse.just_released(MouseButton::Left));
         }
         Some(DrawingPointer::Touch(id)) => {
-            if let Some(touch) = touches.and_then(|touches| touches.get_pressed(id)) {
-                if let Some(point) = ground_point(camera, transform, touch.position()) {
-                    append_path_point(&mut drawing.points, point);
-                }
+            if let Some(touch) = touches.and_then(|touches| touches.get_pressed(id))
+                && let Some(point) = ground_point(camera, transform, touch.position())
+            {
+                append_path_point(&mut drawing.points, point);
             }
             if let Some(touch) = touches.and_then(|touches| touches.get_released(id)) {
                 if let Some(point) = ground_point(camera, transform, touch.position()) {
@@ -282,21 +282,19 @@ fn apply_orders(world: &mut World) {
             .filter(|(_, position, allegiance, tower)| allegiance.0 != faction && position.0.distance(point) <= if tower.is_some() { 2.8 } else { 1.5 })
             .min_by(|a, b| distance_key(a.1.0, point, a.0, b.1.0, b.0))
             .map(|(entity, _, _, _)| entity);
-            world
-                .spawn((
-                    Name::new("Player attack trail"),
-                    MatchEntity,
-                    EntityKind::AttackTrail,
-                    Position(point),
-                    Allegiance(faction),
-                    AttackTrail {
-                        tower,
-                        path_id,
-                        sequence: sequence as u32,
-                        target: if sequence == last { target } else { None },
-                    },
-                ))
-                .id();
+            world.spawn((
+                Name::new("Player attack trail"),
+                MatchEntity,
+                EntityKind::AttackTrail,
+                Position(point),
+                Allegiance(faction),
+                AttackTrail {
+                    tower,
+                    path_id,
+                    sequence: sequence as u32,
+                    target: if sequence == last { target } else { None },
+                },
+            ));
         }
     }
     let trails: Vec<_> = world

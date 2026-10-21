@@ -299,13 +299,13 @@ fn attach_visuals(
 fn donut_transform(index: usize, tower: bool) -> Transform {
     let angle = (index % 8) as f32 * std::f32::consts::TAU / 8.0;
     let radius = if tower { 1.3 } else { 0.65 };
-    let base = if tower { 3.72 } else { 1.0 };
+    let base = if tower { 4.05 } else { 1.15 };
     Transform::from_xyz(
         angle.cos() * radius,
         base + (index / 8) as f32 * 0.24,
         angle.sin() * radius,
     )
-    .with_scale(Vec3::splat(0.18))
+    .with_scale(Vec3::splat(0.36))
 }
 
 // Exclusive reconciliation makes additions/removals visible in this same frame.

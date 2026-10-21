@@ -16,6 +16,9 @@ impl Plugin for PresentationPlugin {
                     browser_state,
                     attach_visuals,
                     sync_visuals,
+                    attach_energy_visuals,
+                    sync_pickup_visuals,
+                    sync_link_visuals,
                     ground_colors,
                     update_hud,
                     camera_controls,
@@ -29,6 +32,10 @@ struct VisualAssets {
     tower: Handle<Mesh>,
     minion: Handle<Mesh>,
     ground: Handle<Mesh>,
+    pickup: Handle<Mesh>,
+    link: Handle<Mesh>,
+    charged: Handle<StandardMaterial>,
+    depleted: Handle<StandardMaterial>,
     materials: Vec<Handle<StandardMaterial>>,
 }
 #[derive(Component)]
@@ -82,6 +89,18 @@ fn setup(
         tower,
         minion,
         ground,
+        pickup: meshes.add(Torus::default()),
+        link: meshes.add(Cuboid::default()),
+        charged: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.95, 1.0, 0.8),
+            unlit: true,
+            ..default()
+        }),
+        depleted: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.18, 0.21, 0.2),
+            unlit: true,
+            ..default()
+        }),
         materials: palette,
     });
     commands.spawn((
@@ -259,13 +278,16 @@ fn attach_visuals(
 fn sync_visuals(
     assets: Res<VisualAssets>,
     factions: Query<&Faction>,
-    mut entities: Query<(
-        &Position,
-        &Allegiance,
-        Option<&Tower>,
-        &mut Transform,
-        &mut MeshMaterial3d<StandardMaterial>,
-    )>,
+    mut entities: Query<
+        (
+            &Position,
+            &Allegiance,
+            Option<&Tower>,
+            &mut Transform,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        Or<(With<Tower>, With<Minion>)>,
+    >,
 ) {
     for (position, allegiance, tower, mut transform, mut material) in &mut entities {
         transform.translation = Vec3::new(
@@ -278,6 +300,101 @@ fn sync_visuals(
             if material.0 != *handle {
                 material.0 = handle.clone();
             }
+        }
+    }
+}
+fn attach_energy_visuals(
+    mut commands: Commands,
+    assets: Res<VisualAssets>,
+    pickups: Query<Entity, (With<EnergyPickup>, Without<Mesh3d>)>,
+    links: Query<(Entity, &Allegiance), (With<Link>, Without<Mesh3d>)>,
+    factions: Query<&Faction>,
+) {
+    for entity in &pickups {
+        commands.entity(entity).insert((
+            Mesh3d(assets.pickup.clone()),
+            MeshMaterial3d(assets.charged.clone()),
+            Transform::default(),
+        ));
+    }
+    for (entity, allegiance) in &links {
+        if let Ok(faction) = factions.get(allegiance.0) {
+            commands.entity(entity).insert((
+                Mesh3d(assets.link.clone()),
+                MeshMaterial3d(assets.materials[faction.index].clone()),
+                Transform::default(),
+            ));
+        }
+    }
+}
+fn sync_pickup_visuals(
+    assets: Res<VisualAssets>,
+    mut pickups: Query<(
+        &Position,
+        &EnergyPickup,
+        &mut Transform,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+) {
+    for (position, pickup, mut transform, mut material) in &mut pickups {
+        transform.translation = Vec3::new(position.0.x, 0.35, position.0.y);
+        transform.scale = Vec3::splat(0.55);
+        let handle = if pickup.available {
+            &assets.charged
+        } else {
+            &assets.depleted
+        };
+        if material.0 != *handle {
+            material.0 = handle.clone();
+        }
+    }
+}
+// Stretch a unit cuboid along local X. Gameplay endpoints remain independent of mesh size.
+fn link_transform(source: Vec2, target: Vec2) -> Option<Transform> {
+    let delta = Vec3::new(target.x - source.x, 0.0, target.y - source.y);
+    let length = delta.length();
+    if !length.is_finite() || length < 0.001 {
+        return None;
+    }
+    Some(Transform {
+        translation: Vec3::new(
+            (source.x + target.x) * 0.5,
+            0.12,
+            (source.y + target.y) * 0.5,
+        ),
+        rotation: Quat::from_rotation_arc(Vec3::X, delta / length),
+        scale: Vec3::new(length, 0.055, 0.055),
+    })
+}
+fn sync_link_visuals(
+    assets: Res<VisualAssets>,
+    positions: Query<&Position>,
+    factions: Query<&Faction>,
+    mut links: Query<(
+        &Link,
+        &Allegiance,
+        &mut Transform,
+        &mut Visibility,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+) {
+    for (link, allegiance, mut transform, mut visibility, mut material) in &mut links {
+        let endpoints = positions
+            .get(link.source)
+            .ok()
+            .zip(positions.get(link.target).ok());
+        let pose = endpoints.and_then(|(source, target)| link_transform(source.0, target.0));
+        let faction = factions.get(allegiance.0).ok();
+        if let (Some(pose), Some(faction)) = (pose, faction) {
+            *transform = pose;
+            *visibility = Visibility::Inherited;
+            let handle = &assets.materials[faction.index];
+            if material.0 != *handle {
+                material.0 = handle.clone();
+            }
+        } else {
+            // Endpoints can disappear during combat/restart before graph reconciliation.
+            *visibility = Visibility::Hidden;
         }
     }
 }
@@ -423,6 +540,10 @@ fn browser_state(
     inspector: Res<InspectorState>,
     minions: Query<(), With<Minion>>,
     towers: Query<(), With<Tower>>,
+    pickups: Query<&EnergyPickup>,
+    links: Query<(), With<Link>>,
+    stores: Query<&EnergyStore, With<Minion>>,
+    clock: Res<EnergyClock>,
 ) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -439,6 +560,25 @@ fn browser_state(
             ("data-speed", state.speed.to_string()),
             ("data-elapsed", state.elapsed.to_string()),
             ("data-inspector", inspector.open.to_string()),
+            ("data-energy-pickups", pickups.iter().count().to_string()),
+            (
+                "data-charged-pickups",
+                pickups
+                    .iter()
+                    .filter(|pickup| pickup.available)
+                    .count()
+                    .to_string(),
+            ),
+            ("data-links", links.iter().count().to_string()),
+            (
+                "data-total-minion-energy",
+                stores
+                    .iter()
+                    .map(|store| u64::from(store.current))
+                    .sum::<u64>()
+                    .to_string(),
+            ),
+            ("data-energy-pulses", clock.pulses.to_string()),
         ] {
             let _ = status.set_attribute(key, &value);
         }
@@ -471,6 +611,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn link_mesh_spans_endpoints_and_rejects_degenerate_segments() {
+        let source = Vec2::new(-3.0, 7.0);
+        let target = Vec2::new(4.0, -2.0);
+        let transform = link_transform(source, target).unwrap();
+        let start = transform.transform_point(Vec3::NEG_X * 0.5);
+        let end = transform.transform_point(Vec3::X * 0.5);
+        assert!(start.distance(Vec3::new(source.x, 0.12, source.y)) < 0.0001);
+        assert!(end.distance(Vec3::new(target.x, 0.12, target.y)) < 0.0001);
+        assert!(link_transform(source, source).is_none());
+        assert!(link_transform(Vec2::splat(f32::NAN), target).is_none());
+    }
+
+    #[test]
     fn units_share_faction_materials_and_capture_recolors_only_the_tower() {
         let mut app = App::new();
         let mut meshes = Assets::<Mesh>::default();
@@ -482,9 +635,23 @@ mod tests {
             tower: meshes.add(Cuboid::new(3.0, 7.0, 3.0)),
             minion: meshes.add(Capsule3d::new(0.42, 0.7)),
             ground: meshes.add(Plane3d::default().mesh().size(100.0, 100.0)),
+            pickup: meshes.add(Torus::default()),
+            link: meshes.add(Cuboid::default()),
+            charged: materials.add(StandardMaterial::from(Color::WHITE)),
+            depleted: materials.add(StandardMaterial::from(Color::BLACK)),
             materials: palette.clone(),
         });
-        app.add_systems(Update, (attach_visuals, sync_visuals).chain());
+        app.add_systems(
+            Update,
+            (
+                attach_visuals,
+                sync_visuals,
+                attach_energy_visuals,
+                sync_pickup_visuals,
+                sync_link_visuals,
+            )
+                .chain(),
+        );
         let original = app.world_mut().spawn(Faction { index: 0 }).id();
         let conqueror = app.world_mut().spawn(Faction { index: 1 }).id();
         let tower = app
@@ -499,7 +666,48 @@ mod tests {
             .world_mut()
             .spawn((Minion, Allegiance(original), Position(Vec2::new(2.0, 3.0))))
             .id();
+        let pickup = app
+            .world_mut()
+            .spawn((
+                EnergyPickup {
+                    available: true,
+                    recharge_remaining: 0.0,
+                },
+                Position(Vec2::new(8.0, 4.0)),
+            ))
+            .id();
+        let link = app
+            .world_mut()
+            .spawn((
+                Link {
+                    source: tower,
+                    target: minion,
+                },
+                Allegiance(original),
+            ))
+            .id();
         app.world_mut().run_schedule(Update);
+        let charged = app.world().resource::<VisualAssets>().charged.clone();
+        let depleted = app.world().resource::<VisualAssets>().depleted.clone();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(pickup)
+                .unwrap()
+                .0,
+            charged
+        );
+        assert_eq!(
+            app.world().get::<Mesh3d>(pickup).unwrap().0,
+            app.world().resource::<VisualAssets>().pickup
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(link).unwrap(),
+            Visibility::Inherited
+        );
+        app.world_mut()
+            .get_mut::<EnergyPickup>(pickup)
+            .unwrap()
+            .available = false;
         for entity in [tower, minion] {
             assert_eq!(
                 app.world()
@@ -530,6 +738,23 @@ mod tests {
         assert_eq!(
             app.world().get::<Position>(minion).unwrap().0,
             Vec2::new(2.0, 3.0)
+        );
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(pickup)
+                .unwrap()
+                .0,
+            depleted
+        );
+        assert_eq!(
+            app.world().get::<Transform>(pickup).unwrap().translation.y,
+            0.35
+        );
+        app.world_mut().despawn(minion);
+        app.world_mut().run_schedule(Update);
+        assert_eq!(
+            *app.world().get::<Visibility>(link).unwrap(),
+            Visibility::Hidden
         );
     }
 }

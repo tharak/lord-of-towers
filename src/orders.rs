@@ -439,7 +439,10 @@ mod tests {
             .0
             .push(Vec2::X * 10000.0);
         app.world_mut().run_schedule(Update);
-        assert_eq!(app.world().get::<AttackOrder>(minion).unwrap().trail, first_trail);
+        assert_eq!(
+            app.world().get::<AttackOrder>(minion).unwrap().trail,
+            first_trail
+        );
         assert!(app.world().get::<AttackOrder>(other_minion).is_none());
         assert!(app.world().get_entity(nearest_trail).is_err());
     }

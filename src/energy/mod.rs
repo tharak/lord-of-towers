@@ -3,7 +3,6 @@ use crate::model::{EnergyClock, SimSet};
 use bevy::prelude::*;
 
 mod network;
-pub mod pickups;
 
 pub struct EnergyPlugin;
 impl Plugin for EnergyPlugin {
@@ -11,8 +10,6 @@ impl Plugin for EnergyPlugin {
         app.init_resource::<EnergyClock>().add_systems(
             FixedUpdate,
             (
-                pickups::recharge_pickups,
-                pickups::collect_pickups,
                 network::reconcile_links,
                 network::transfer_energy,
             )

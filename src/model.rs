@@ -40,7 +40,8 @@ pub enum EntityKind {
     Faction,
     Tower,
     Minion,
-    EnergyPickup,
+    RawElementDeposit,
+    Trail,
     Link,
     Battlefield,
     Camera,
@@ -56,8 +57,6 @@ pub struct Health {
 }
 #[derive(Component, Debug)]
 pub struct Spawner {
-    pub elapsed: f32,
-    pub interval: f32,
     pub cap: usize,
 }
 #[derive(Component, Clone, Copy, Debug)]
@@ -82,19 +81,22 @@ pub struct InfluenceEmitter {
 #[derive(Resource, Clone, Debug)]
 pub struct SimulationConfig {
     pub half_extent: f32,
-    pub spawn_interval: f32,
+    pub starting_minions: usize,
+    pub minion_raw_cost: u32,
     pub population_cap: usize,
     pub minion_speed: f32,
     pub minion_health: f32,
     pub tower_health: f32,
     pub seed: u64,
-    pub energy_pickup_count: usize,
+    pub deposit_count: usize,
+    pub vision_radius: f32,
+    pub delivery_radius: f32,
+    pub trail_spacing: f32,
+    pub trail_lifetime: f32,
     pub initial_energy: u8,
     pub energy_capacity: u8,
     pub attack_energy_cost: u8,
     pub pickup_radius: f32,
-    pub pickup_recharge_seconds: f32,
-    pub energy_seek_radius: f32,
     pub link_range: f32,
     pub energy_tick_seconds: f32,
     pub energy_transfer_ticks: u32,
@@ -103,19 +105,22 @@ impl Default for SimulationConfig {
     fn default() -> Self {
         Self {
             half_extent: 50.0,
-            spawn_interval: 2.0,
+            starting_minions: 3,
+            minion_raw_cost: 5,
             population_cap: 100,
             minion_speed: 4.0,
             minion_health: 30.0,
             tower_health: 180.0,
             seed: 42,
-            energy_pickup_count: 30,
+            deposit_count: 30,
+            vision_radius: 15.0,
+            delivery_radius: 3.0,
+            trail_spacing: 2.0,
+            trail_lifetime: 30.0,
             initial_energy: 5,
             energy_capacity: 5,
             attack_energy_cost: 1,
             pickup_radius: 1.0,
-            pickup_recharge_seconds: 5.0,
-            energy_seek_radius: 15.0,
             link_range: 15.0,
             energy_tick_seconds: 1.0,
             energy_transfer_ticks: 5,
@@ -154,6 +159,8 @@ pub enum SimSet {
     Movement,
     Combat,
     Capture,
+    Gathering,
+    PaidSpawn,
     Energy,
     Influence,
     Victory,
@@ -175,11 +182,43 @@ pub struct EnergyStore {
     pub capacity: u8,
 }
 
-/// A stationary neutral pickup with a single unit of rechargeable energy.
+/// Gameplay inventory: deposits, minion cargo (0..=1), or tower stock.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct RawElement(pub u32);
 #[derive(Component, Clone, Copy, Debug)]
-pub struct EnergyPickup {
-    pub available: bool,
-    pub recharge_remaining: f32,
+pub struct RawElementDeposit;
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Vision {
+    pub radius: f32,
+}
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub enum GatheringState {
+    #[default]
+    Exploring,
+    Following {
+        trip: u64,
+        sequence: u32,
+    },
+    Returning {
+        tower: Option<Entity>,
+    },
+}
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Trail {
+    pub trip: u64,
+    pub sequence: u32,
+    pub remaining: f32,
+}
+#[derive(Component, Clone, Copy, Debug)]
+pub struct TrailEmitter {
+    pub trip: u64,
+    pub next_sequence: u32,
+    pub last_position: Vec2,
+}
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct RawElementEconomy {
+    pub initial: u32,
+    pub spent: u32,
 }
 
 /// Each directed edge is an independent ECS entity, from supplier to recipient.

@@ -14,7 +14,7 @@ The inspector queries the live ECS world. Cycle kind/faction filters, include en
 
 ## Simulation
 
-Each tower begins as its own faction. Each tower starts with three minions and no rawElement stock. Five delivered rawElement create one new minion, capped at 100 living minions per origin tower; stock is retained while capped. Minions gather first and attack nearby rivals without chasing or stopping. Combat damage is simultaneous. Captured towers restore health and begin producing for their conqueror; existing armies keep their original faction. Controlling all five towers wins.
+Each tower begins as its own faction. Each tower starts with three minions and no rawElement stock. Five delivered rawElement create one new minion, capped at 100 living minions per origin tower; stock is retained while capped. Minions gather first and attack nearby rivals without chasing or stopping. Enemy minions take priority over towers when both are in attack range. Combat damage occurs when fired energy spheres hit; impacts in one fixed step resolve together. Captured towers restore health and begin producing for their conqueror; existing armies keep their original faction. Controlling all five towers wins.
 
 Territory reflects current radial influence, with soft borders and neutral ground where no army or tower is present. It is not permanent paint or a tile movement system. The initial numerical balance is intentionally simple and configurable in `SimulationConfig`.
 
@@ -38,13 +38,13 @@ One visible donut per rawElement unit forms a crown above each carrying minion o
 
 ## Energy and supply
 
-Minions start with five energy and can store at most five. Each successful attack costs one. Gathering continues at zero energy; donuts no longer provide combat energy.
+Minions start with five energy and can store at most five. One small sphere circles each minion per stored energy point. Attacking spends one energy immediately and fires a sphere at the target; damage occurs when it hits. Shots fizzle if their target disappears or becomes friendly. Gathering continues at zero energy; donuts never provide combat energy.
 
 Straight faction-colored lines are actual Link entities. They connect friendly minions into tower-rooted branches, with at most 15 world units per link. Every five simulation seconds, each tower or connected minion sends one energy total to an eligible child, rotating fairly. Towers supply unlimited energy; minions spend their stored energy, including their last point. Transfers happen simultaneously, so incoming energy cannot travel multiple links in one pulse. Full recipients are skipped. Links do not share vision.
 
 ## Architecture and collaboration
 
-See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [shared nomenclature on the GitHub wiki](https://github.com/tharak/lord-of-towers/wiki), [gathering contracts](docs/gathering-contracts.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/3). Simulation, gathering, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
+See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [shared nomenclature on the GitHub wiki](https://github.com/tharak/lord-of-towers/wiki), [gathering contracts](docs/gathering-contracts.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/5). Simulation, gathering, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
 
 ## Development
 

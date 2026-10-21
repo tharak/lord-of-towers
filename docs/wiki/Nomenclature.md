@@ -10,6 +10,8 @@
 | **trail** | A temporary faction-owned breadcrumb left by a carrier. Visible allies follow decreasing sequence numbers toward a deposit. | `Trail` entity/component |
 | **link** | A live tower-rooted supply edge that transfers combat energy every five simulation seconds. Links do not share vision or rawElement. | `Link` entity/component |
 | **energy** | Combat/forwarding reserve. An attack costs one; towers are unlimited supply roots. It is separate from rawElement. | `EnergyStore` and `EnergyClock` |
+| **energy orb** | A small sphere around a minion, representing one stored energy point. It carries no gameplay energy itself. | `EnergyOrbVisual` entity kind; Bevy `Sphere` mesh |
+| **energy projectile** | A fired energy point moving toward a live hostile target. Damage happens on impact. | `EnergyProjectile` entity/component; Bevy `Sphere` mesh |
 | **vision** | A minion's 15-unit circular detection range for deposits, trails, and enemies. Friendly tower locations remain known for delivery. | `Vision` component |
 | **entity kind** | Inspectable application category assigned with `Name` to every application-created entity. | `EntityKind` component |
 

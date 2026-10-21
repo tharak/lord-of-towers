@@ -32,6 +32,7 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   const energy = Number(await status.getAttribute('data-total-minion-energy'));
   expect(energy).toBeGreaterThanOrEqual(0);
   expect(energy).toBeLessThanOrEqual(minions * 5);
+  await expect(status).toHaveAttribute('data-energy-orbs', String(energy));
   expect(Number(await status.getAttribute('data-links'))).toBeLessThanOrEqual(minions);
   await page.waitForTimeout(800);
   expect(Number(await status.getAttribute('data-elapsed'))).toBe(elapsed);
@@ -60,6 +61,7 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await page.waitForTimeout(800);
   await expect(status).toHaveAttribute('data-trails', trails);
   await expect(status).toHaveAttribute('data-donut-visuals', String(raw.carried + raw.stock));
+  await expect(status).toHaveAttribute('data-energy-orbs', await status.getAttribute('data-total-minion-energy'));
   await page.screenshot({ path: testInfo.outputPath('gathering-trails.png') });
   await page.keyboard.press('KeyR');
   await expect(status).toHaveAttribute('data-speed', '1');
@@ -71,6 +73,8 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await expect(status).toHaveAttribute('data-raw-spent', '0');
   await expect(status).toHaveAttribute('data-trails', '0');
   await expect(status).toHaveAttribute('data-donut-visuals', '0');
+  await expect(status).toHaveAttribute('data-energy-orbs', '75');
+  await expect(status).toHaveAttribute('data-energy-projectiles', '0');
   await expect(status).toHaveAttribute('data-raw-remaining', String(initialRaw));
   await expect.poll(async () => Number(await status.getAttribute('data-elapsed'))).toBeLessThan(2);
   await expect(status).toHaveAttribute('data-towers', '5');

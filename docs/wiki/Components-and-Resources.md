@@ -11,7 +11,8 @@
 | `OriginTower` | Tower that spawned a minion; population cap counts living minions by this reference. |
 | `Position`, `Health`, `Movement` | World position, health, and steering target/speed. |
 | `Spawner` | Population cap for minions from a tower; rawElement payment is handled by the spawn system. |
-| `Attack` | Damage, reach, cooldown, and time until the next attack. Eligible enemy minions take priority over towers. |
+| `Attack` | Damage, reach, cooldown, and time until the next shot. Eligible enemy minions take priority over towers. Firing spends one energy; damage occurs on projectile impact. |
+| `EnergyProjectile` | Target, damage, flight speed, and remaining simulation lifetime of a fired energy sphere. |
 | `Vision` | Local circular radius; default 15. |
 | `RawElement` | Quantity on a deposit, cargo on a minion (0–1), or stock in a tower. No crown child has this component. |
 | `GatheringState` | Exploring, following a local trail, or returning to a friendly tower. |
@@ -26,6 +27,7 @@
 | Component | Meaning |
 |---|---|
 | `DonutVisual` | Presentation-only crown child. One per actual rawElement unit; rendered with shared Bevy `Torus` mesh. |
+| `EnergyOrbVisual` | Presentation-only small sphere child. One per actual stored minion energy point. |
 | `SpectatorCamera` | Camera control target. |
 | `StatusText`, `FactionText`, `Control` | Debug HUD labels and clickable controls. |
 | `InspectorRoot`, `InspectorText`, `InspectorAction` | Inspector panel, details, and navigation/filter controls. |
@@ -45,7 +47,7 @@
 | `InfluenceField` | Bounded influence samples and territory percentages. |
 | `InspectorState`, `InspectorFilter` | Inspector visibility and filters. |
 | `GatheringRuntime`, `RandomStream`, `SpawnSequence` | Seeded exploration and stable spawn/trip ordering. |
-| `SpatialIndex`, `PendingDamage` | Per-step nearby combat lookup and simultaneous attack resolution. |
+| `SpatialIndex`, `PendingDamage` | Per-step nearby combat lookup and simultaneous resolution of projectile impacts. |
 | `VisualAssets` | Shared primitive meshes and materials; no gameplay inventory. |
 
 Bevy `Time<Fixed>` supplies the 30 Hz step. Gameplay timers use simulation speed and stop when paused, hidden, or won.

@@ -263,6 +263,7 @@ fn spawn_minion(
                 radius: config.vision_radius,
             },
             GatheringState::Exploring,
+            ShootingPause::default(),
         ),
         (
             Name::new("Minion"),
@@ -283,7 +284,7 @@ fn spawn_minion(
             },
             Attack {
                 damage: 10.0,
-                range: 1.6,
+                range: 6.0,
                 cooldown: 0.8,
                 remaining: 0.0,
             },
@@ -382,10 +383,19 @@ fn move_minions(
     state: Res<MatchState>,
     config: Res<SimulationConfig>,
     spatial: Res<SpatialIndex>,
-    mut minions: Query<(Entity, &mut Position, &Movement), With<Minion>>,
+    mut minions: Query<
+        (Entity, &mut Position, &Movement, Option<&mut ShootingPause>),
+        With<Minion>,
+    >,
 ) {
     let dt = simulation_delta(&time, &state);
-    for (entity, mut position, movement) in &mut minions {
+    for (entity, mut position, movement, pause) in &mut minions {
+        if let Some(mut pause) = pause
+            && pause.0 > 0.0
+        {
+            pause.0 = (pause.0 - dt).max(0.0);
+            continue;
+        }
         let offset = movement.target - position.0;
         let mut velocity =
             offset.normalize_or_zero() * movement.speed.min(offset.length() / dt.max(0.0001));
@@ -452,8 +462,12 @@ fn collect_damage(
     state: Res<MatchState>,
     spatial: Res<SpatialIndex>,
     factions: Query<&Faction>,
+    trails: Query<&AttackTrail>,
+    health: Query<&Health>,
     mut attackers: Query<
         (
+            Entity,
+            Option<&AttackOrder>,
             &Position,
             &Allegiance,
             &mut Attack,
@@ -465,7 +479,7 @@ fn collect_damage(
     config: Res<SimulationConfig>,
 ) {
     let dt = simulation_delta(&time, &state);
-    for (position, faction, mut attack, mut energy, vision) in &mut attackers {
+    for (entity, order, position, faction, mut attack, mut energy, vision) in &mut attackers {
         attack.remaining = (attack.remaining - dt).max(0.0);
         if attack.remaining > 0.0 || energy.current < config.attack_energy_cost {
             continue;
@@ -476,6 +490,10 @@ fn collect_damage(
         else {
             continue;
         };
+        let ordered_target = order
+            .and_then(|order| trails.get(order.trail).ok())
+            .and_then(|trail| trail.target)
+            .filter(|target| health.get(*target).is_ok_and(|health| health.current > 0.0));
         let target = spatial
             .nearby(position.0, attack.range + 2.0)
             .filter(|entry| {
@@ -485,8 +503,9 @@ fn collect_damage(
                         <= attack.range + if entry.tower { 2.0 } else { 0.0 }
             })
             .min_by(|a, b| {
-                a.tower
-                    .cmp(&b.tower)
+                (Some(a.entity) != ordered_target)
+                    .cmp(&(Some(b.entity) != ordered_target))
+                    .then(a.tower.cmp(&b.tower))
                     .then_with(|| {
                         position
                             .0
@@ -509,6 +528,7 @@ fn collect_damage(
                     remaining: config.projectile_lifetime,
                 },
             ));
+            commands.entity(entity).insert(ShootingPause(1.0));
             attack.remaining = attack.cooldown;
             energy.current -= config.attack_energy_cost;
         }
@@ -518,16 +538,8 @@ fn collect_damage(
 fn resolve_damage(
     mut commands: Commands,
     mut pending: ResMut<PendingDamage>,
-    factions: Res<FactionEntities>,
     mut units: Query<
-        (
-            &mut Health,
-            &mut Allegiance,
-            Option<&mut Spawner>,
-            Option<&mut ForwardingCursor>,
-            &Position,
-            Option<&RawElement>,
-        ),
+        (&mut Health, &Position, Option<&RawElement>),
         Or<(With<Tower>, With<Minion>)>,
     >,
     ids: Query<&SimulationId>,
@@ -535,37 +547,19 @@ fn resolve_damage(
     let mut hits: Vec<_> = pending.0.drain().collect();
     hits.sort_by_key(|(entity, _)| ids.get(*entity).map_or(entity.to_bits(), |id| id.0));
     for (entity, contributions) in hits {
-        let Ok((mut health, mut allegiance, spawner, cursor, position, cargo)) =
-            units.get_mut(entity)
-        else {
+        let Ok((mut health, position, cargo)) = units.get_mut(entity) else {
             continue;
         };
         health.current -= contributions.iter().sum::<f32>();
         if health.current > 0.0 {
             continue;
         }
-        if spawner.is_some() {
-            let mut winner = 0;
-            for index in 1..5 {
-                if contributions[index] > contributions[winner] {
-                    winner = index;
-                }
-            }
-            if let Some(faction) = factions.0.get(winner) {
-                allegiance.0 = *faction;
-                health.current = health.max;
-                if let Some(mut cursor) = cursor {
-                    *cursor = ForwardingCursor::default();
-                }
-            }
-        } else {
-            if let Some(cargo) = cargo
-                && cargo.0 > 0
-            {
-                crate::gathering::drop_cargo(&mut commands, position.0, cargo.0);
-            }
-            commands.entity(entity).despawn();
+        if let Some(cargo) = cargo
+            && cargo.0 > 0
+        {
+            crate::gathering::drop_cargo(&mut commands, position.0, cargo.0);
         }
+        commands.entity(entity).despawn();
     }
 }
 
@@ -576,9 +570,11 @@ fn check_victory(
 ) {
     let mut ownership = towers.iter();
     let Some(first) = ownership.next() else {
+        state.winner = None;
+        state.paused = true;
         return;
     };
-    if ownership.all(|owner| owner == first)
+    if ownership.next().is_none()
         && let Ok(faction) = factions.get(first.0)
     {
         state.winner = Some(faction.index);
@@ -633,6 +629,13 @@ mod tests {
         assert_eq!(count::<Minion>(&mut app), 15);
         assert_eq!(count::<RawElementDeposit>(&mut app), 30);
         assert_eq!(app.world().resource::<SpawnSequence>().0, 20);
+        for attack in app
+            .world_mut()
+            .query_filtered::<&Attack, With<Minion>>()
+            .iter(app.world())
+        {
+            assert_eq!(attack.range, 6.0);
+        }
         let mut ids = Vec::new();
         for (id, energy, raw, vision, state, _) in app
             .world_mut()
@@ -681,10 +684,9 @@ mod tests {
     }
 
     #[test]
-    fn capture_retains_stock_and_old_army_and_resets_forwarding() {
+    fn destroyed_tower_drops_stock_and_preserves_existing_army() {
         let mut app = app();
         let tower = tower(&mut app);
-        let factions = app.world().resource::<FactionEntities>().0.clone();
         let old_owner = app.world().get::<Allegiance>(tower).unwrap().0;
         let army: Vec<_> = app
             .world_mut()
@@ -694,10 +696,8 @@ mod tests {
             .map(|(entity, _)| entity)
             .collect();
         app.world_mut().get_mut::<RawElement>(tower).unwrap().0 = 4;
-        app.world_mut()
-            .get_mut::<ForwardingCursor>(tower)
-            .unwrap()
-            .last_recipient = Some(123);
+        let before = total(&mut app);
+        let deposits = count::<RawElementDeposit>(&mut app);
         app.world_mut()
             .resource_mut::<PendingDamage>()
             .0
@@ -705,15 +705,10 @@ mod tests {
         let mut schedule = Schedule::default();
         schedule.add_systems(resolve_damage);
         schedule.run(app.world_mut());
-        assert_eq!(app.world().get::<Allegiance>(tower).unwrap().0, factions[1]);
-        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 4);
-        assert_eq!(
-            app.world()
-                .get::<ForwardingCursor>(tower)
-                .unwrap()
-                .last_recipient,
-            None
-        );
+        assert!(app.world().get_entity(tower).is_err());
+        assert_eq!(count::<Tower>(&mut app), 4);
+        assert_eq!(count::<RawElementDeposit>(&mut app), deposits + 1);
+        assert_eq!(total(&mut app), before);
         for entity in army {
             assert_eq!(app.world().get::<Allegiance>(entity).unwrap().0, old_owner);
         }
@@ -992,7 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn combat_uses_actual_inclusive_vision_and_keeps_gathering_movement() {
+    fn combat_uses_actual_inclusive_vision_and_pauses_gathering_movement() {
         let mut app = app();
         let factions = app.world().resource::<FactionEntities>().0.clone();
         let attacker = app
@@ -1042,11 +1037,125 @@ mod tests {
         let mut movement = Schedule::default();
         movement.add_systems(move_minions);
         movement.run(app.world_mut());
+        assert_eq!(app.world().get::<Position>(attacker).unwrap().0, Vec2::ZERO);
+        assert!(app.world().get::<ShootingPause>(attacker).unwrap().0 < 1.0);
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .advance_by(std::time::Duration::from_secs_f32(1.0));
+        movement.run(app.world_mut());
+        movement.run(app.world_mut());
         assert!(app.world().get::<Position>(attacker).unwrap().0.y > 0.0);
         assert_eq!(
             app.world().get::<Movement>(attacker).unwrap().target,
             Vec2::Y * 10.0
         );
+    }
+
+    #[test]
+    fn ordered_target_wins_at_six_units_and_falls_back_when_friendly() {
+        let mut app = app();
+        let factions = app.world().resource::<FactionEntities>().0.clone();
+        let center = Vec2::splat(1000.0);
+        let target = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center + Vec2::X * 6.0),
+                Allegiance(factions[1]),
+                Health {
+                    current: 30.0,
+                    max: 30.0,
+                },
+            ))
+            .id();
+        let closer = app
+            .world_mut()
+            .spawn((Minion, Position(center + Vec2::X), Allegiance(factions[1])))
+            .id();
+        let attacker = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center),
+                Allegiance(factions[0]),
+                Vision { radius: 15.0 },
+                EnergyStore {
+                    current: 5,
+                    capacity: 5,
+                },
+                Attack {
+                    damage: 10.0,
+                    range: 6.0,
+                    cooldown: 0.8,
+                    remaining: 0.0,
+                },
+            ))
+            .id();
+        let trail = app
+            .world_mut()
+            .spawn(AttackTrail {
+                tower: Entity::PLACEHOLDER,
+                assigned: attacker,
+                target: Some(target),
+            })
+            .id();
+        app.world_mut()
+            .entity_mut(attacker)
+            .insert(AttackOrder { trail });
+        let mut combat = Schedule::default();
+        combat.add_systems((rebuild_index, collect_damage).chain());
+        combat.run(app.world_mut());
+        let shot = app
+            .world_mut()
+            .query::<(Entity, &EnergyProjectile)>()
+            .iter(app.world())
+            .map(|(entity, shot)| (entity, shot.target))
+            .next()
+            .unwrap();
+        assert_eq!(shot.1, target);
+        assert_eq!(app.world().get::<ShootingPause>(attacker).unwrap().0, 1.0);
+        app.world_mut().despawn(shot.0);
+        app.world_mut().get_mut::<Allegiance>(target).unwrap().0 = factions[0];
+        app.world_mut()
+            .get_mut::<Attack>(attacker)
+            .unwrap()
+            .remaining = 0.0;
+        combat.run(app.world_mut());
+        assert_eq!(
+            app.world_mut()
+                .query::<&EnergyProjectile>()
+                .iter(app.world())
+                .next()
+                .unwrap()
+                .target,
+            closer
+        );
+    }
+
+    #[test]
+    fn victory_requires_one_surviving_tower_and_empty_arena_is_a_draw() {
+        let mut app = app();
+        let towers: Vec<_> = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tower>>()
+            .iter(app.world())
+            .collect();
+        let mut victory = Schedule::default();
+        victory.add_systems(check_victory);
+        victory.run(app.world_mut());
+        assert_eq!(app.world().resource::<MatchState>().winner, None);
+        for entity in &towers[1..] {
+            app.world_mut().despawn(*entity);
+        }
+        let owner = app.world().get::<Allegiance>(towers[0]).unwrap().0;
+        let winner = app.world().get::<Faction>(owner).unwrap().index;
+        victory.run(app.world_mut());
+        assert_eq!(app.world().resource::<MatchState>().winner, Some(winner));
+        assert!(app.world().resource::<MatchState>().paused);
+        app.world_mut().despawn(towers[0]);
+        victory.run(app.world_mut());
+        assert_eq!(app.world().resource::<MatchState>().winner, None);
+        assert!(app.world().resource::<MatchState>().paused);
     }
 
     #[test]
@@ -1124,7 +1233,7 @@ mod tests {
             step(&mut app, 100);
             let minions = count::<Minion>(&mut app);
             assert!(minions <= 500);
-            assert_eq!(count::<Tower>(&mut app), 5);
+            assert!(count::<Tower>(&mut app) <= 5);
             assert!(count::<RawElementDeposit>(&mut app) as u32 <= initial);
             assert!(count::<Trail>(&mut app) <= 500 * 100);
             assert!(count::<Link>(&mut app) <= minions);

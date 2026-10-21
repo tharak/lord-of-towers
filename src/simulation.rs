@@ -174,6 +174,9 @@ fn create_match(
                 },
             ))
             .id();
+        if index == 0 {
+            commands.entity(tower).insert(PlayerControlled);
+        }
         for _ in 0..config.starting_minions.min(config.population_cap) {
             spawn_minion(
                 commands,
@@ -629,6 +632,13 @@ mod tests {
         let mut app = app();
         assert_eq!(count::<Minion>(&mut app), 15);
         assert_eq!(count::<RawElementDeposit>(&mut app), 30);
+        let controlled: Vec<_> = app
+            .world_mut()
+            .query_filtered::<&Tower, With<PlayerControlled>>()
+            .iter(app.world())
+            .map(|tower| tower.slot)
+            .collect();
+        assert_eq!(controlled, vec![0]);
         assert_eq!(app.world().resource::<SpawnSequence>().0, 20);
         for attack in app
             .world_mut()

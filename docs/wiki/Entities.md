@@ -5,10 +5,10 @@ Every application-created entity has `Name` and `EntityKind`. Gameplay entities 
 | Entity kind | Purpose and main components | Creation and removal |
 |---|---|---|
 | `Faction` | Faction identity and index. | Five per match; replaced on restart. |
-| `Tower` | Destructible root with `Allegiance`, `Position`, `Health`, `Spawner`, `RawElement` stock, `ForwardingCursor`, `InfluenceEmitter`, and visual `Stack`. | Five per match. At zero health it despawns and drops its stock. |
+| `Tower` | Destructible root with `Allegiance`, `Position`, `Health`, `Spawner`, `RawElement` stock, `ForwardingCursor`, `InfluenceEmitter`, and visual `Stack`. Orthanc alone has `PlayerControlled`. | Five per match. At zero health it despawns and drops its stock; restart recreates the one player tower. |
 | `Minion` | Mobile unit with `Allegiance`, `OriginTower`, `Position`, `Health`, `Movement`, `Attack`, `EnergyStore`, `RawElement` cargo, `Vision`, `GatheringState`, optional `TrailEmitter` and `SupplyConnection`. | Three start at each tower; paid spawns cost five rawElement. Death drops cargo and despawns the unit. |
 | `RawElementDeposit` | Neutral collectable stack of donuts with `Position`, `RawElement` quantity, and visual `Stack`. | Thirty seeded deposits plus cargo and tower-stock drops; removed at zero quantity; no recharge. |
-| `AttackTrail` | Player order with issuing tower, assigned minion, optional moving enemy target, and destination `Position`. Drawn as a tower-to-target laser. | Created by mouse/touch map input; replaced on reassignment, removed with tower/restart. |
+| `AttackTrail` | Player order with issuing Orthanc tower, assigned minion, optional moving enemy target, and destination `Position`. Drawn as a tower-to-target laser. | Created by left-click/touch; replaced on reassignment, canceled by right-click nearest trail, removed with tower/restart. |
 | `StackVisual` | One child cube in a tower-health stack or torus in a map-deposit stack. | Reconciled to its parent's current health or rawElement count. |
 | `TowerBeacon` | Sphere at the top of a tower-health stack; laser origin and support for donut crown. | One per living tower, removed with parent. |
 | `DonutVisual` | One torus crown piece per rawElement on its parent tower or minion. Holds no inventory. | Visual child added/removed as parent inventory changes; removed with parent. |

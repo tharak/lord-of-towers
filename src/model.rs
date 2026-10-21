@@ -31,6 +31,9 @@ pub struct OriginTower(pub Entity);
 pub struct Tower {
     pub slot: usize,
 }
+/// The one tower whose minions accept player attack orders.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct PlayerControlled;
 #[derive(Component, Debug)]
 pub struct Minion;
 #[derive(Component, Debug)]
@@ -249,6 +252,10 @@ pub struct AttackOrder {
 /// Screen-to-world input is queued until the next simulation step.
 #[derive(Resource, Default)]
 pub struct AttackOrderRequests(pub Vec<Vec2>);
+
+/// Right-click locations pending cancellation of the closest player attack trail.
+#[derive(Resource, Default)]
+pub struct CancelAttackOrderRequests(pub Vec<Vec2>);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct TrailEmitter {
     pub trip: u64,

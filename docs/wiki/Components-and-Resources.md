@@ -13,7 +13,7 @@
 | `Position`, `Health`, `Movement` | World position, health, and steering target/speed. |
 | `Spawner` | Population cap for minions from a tower; rawElement payment is handled by the spawn system. |
 | `Attack` | Damage, reach, cooldown, and time until the next shot. Eligible enemy minions take priority over towers. Firing spends one energy; damage occurs on projectile impact. |
-| `AttackTrail`, `AttackOrder` | Player-placed destination with tower/assigned minion/optional enemy target, and the minion's reference to its live order. |
+| `AttackTrail`, `AttackOrder` | Numbered player-drawn path markers with issuing tower, path ID and optional target at the end; a follower's `AttackOrder` references its current marker. Drawing itself assigns no minion. |
 | `ShootingPause` | Remaining simulation time that a minion stays still after firing. |
 | `EnergyProjectile` | Target, damage, flight speed, and remaining simulation lifetime of a fired energy sphere. |
 | `Vision` | Local circular radius; default 15. |
@@ -45,8 +45,8 @@
 | Resource | Meaning |
 |---|---|
 | `SimulationConfig` | Default world size, seed, vision, gathering, combat, spawning, trail and energy tuning. |
-| `AttackOrderRequests` | Pending screen-to-world map clicks/touches consumed by the next simulation step. |
-| `CancelAttackOrderRequests` | Pending right-click ground points used to remove the nearest player attack trail within two world units of its destination. |
+| `AttackOrderRequests` | Pending screen-to-world mouse/touch paths consumed by the next simulation step. |
+| `CancelAttackOrderRequests` | Pending right-click ground points used to remove the whole player path when a marker is within two world units. |
 | `MatchState` | Pause, speed, hidden-tab, elapsed time, winner and restart request. |
 | `FactionEntities` | Five live faction entity IDs for deterministic ownership lookup. |
 | `RawElementEconomy` | Initial resource total and cumulative spending; verifies that live deposits, cargo and stock plus spending equal the initial total. |

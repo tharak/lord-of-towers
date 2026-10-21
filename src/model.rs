@@ -42,9 +42,12 @@ pub enum EntityKind {
     Minion,
     RawElementDeposit,
     Trail,
+    AttackTrail,
     DonutVisual,
     EnergyOrbVisual,
     EnergyProjectile,
+    StackVisual,
+    TowerBeacon,
     Link,
     Battlefield,
     Camera,
@@ -75,6 +78,9 @@ pub struct Attack {
     pub cooldown: f32,
     pub remaining: f32,
 }
+/// Movement pause after firing; counted in simulation seconds.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct ShootingPause(pub f32);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct InfluenceEmitter {
     pub radius: f32,
@@ -163,6 +169,7 @@ pub enum SimSet {
     Spawn,
     Index,
     Target,
+    Orders,
     Movement,
     Combat,
     Capture,
@@ -225,6 +232,23 @@ pub struct Trail {
     pub sequence: u32,
     pub remaining: f32,
 }
+/// A player-placed destination; the optional enemy target updates its position each step.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct AttackTrail {
+    pub tower: Entity,
+    pub assigned: Entity,
+    pub target: Option<Entity>,
+}
+
+/// Present on a minion while it follows a player-placed attack trail.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct AttackOrder {
+    pub trail: Entity,
+}
+
+/// Screen-to-world input is queued until the next simulation step.
+#[derive(Resource, Default)]
+pub struct AttackOrderRequests(pub Vec<Vec2>);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct TrailEmitter {
     pub trip: u64,

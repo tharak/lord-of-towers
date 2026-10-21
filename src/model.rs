@@ -42,6 +42,7 @@ pub enum EntityKind {
     Minion,
     RawElementDeposit,
     Trail,
+    CargoVisual,
     Link,
     Battlefield,
     Camera,

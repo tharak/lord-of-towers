@@ -14,6 +14,8 @@ impl Plugin for PresentationPlugin {
                     keyboard_controls,
                     button_controls,
                     attach_visuals,
+                    sync_stacks,
+                    sync_attack_lasers,
                     sync_donut_visuals,
                     sync_energy_orbs,
                     attach_projectile_visuals,
@@ -71,7 +73,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let tower = meshes.add(Cuboid::new(3.0, 7.0, 3.0));
+    let tower = meshes.add(Cuboid::new(0.62, 0.62, 0.62));
     let minion = meshes.add(Capsule3d::new(0.42, 0.7));
     let ground = meshes.add(
         Plane3d::default()
@@ -285,28 +287,201 @@ fn attach_visuals(
     factions: Query<&Faction>,
     entities: Query<
         (Entity, &Allegiance, Option<&Tower>),
-        (Or<(With<Tower>, With<Minion>)>, Without<Mesh3d>),
+        (Or<(With<Tower>, With<Minion>)>, Without<Transform>),
     >,
 ) {
     for (entity, allegiance, tower) in &entities {
         if let Ok(faction) = factions.get(allegiance.0) {
             commands.entity(entity).insert((
-                Mesh3d(if tower.is_some() {
-                    assets.tower.clone()
-                } else {
-                    assets.minion.clone()
-                }),
                 MeshMaterial3d(assets.materials[faction.index].clone()),
                 Transform::default(),
+                Visibility::Inherited,
             ));
+            if tower.is_none() {
+                commands
+                    .entity(entity)
+                    .insert(Mesh3d(assets.minion.clone()));
+            }
         }
     }
 }
+/// Reusable primitive stack: count, grid layout, and spacing are presentation only.
+#[derive(Component, Clone, Copy, Debug)]
+struct Stack {
+    count: usize,
+    columns: usize,
+    spacing: Vec3,
+}
+#[derive(Component)]
+struct StackPiece;
+#[derive(Component)]
+struct TowerBeacon;
+
+impl Stack {
+    fn transform(self, index: usize) -> Transform {
+        let width = self.columns;
+        let layer = width * width;
+        Transform::from_xyz(
+            (index % width) as f32 * self.spacing.x - (width - 1) as f32 * self.spacing.x / 2.0,
+            (index / layer) as f32 * self.spacing.y + self.spacing.y / 2.0,
+            ((index / width) % width) as f32 * self.spacing.z
+                - (width - 1) as f32 * self.spacing.z / 2.0,
+        )
+    }
+}
+fn health_count(health: Option<&Health>) -> usize {
+    health.map_or(0, |health| health.current.max(0.0).floor() as usize)
+}
+fn tower_top(health: Option<&Health>) -> f32 {
+    health_count(health).div_ceil(16) as f32 * 0.68
+}
+fn sync_stacks(world: &mut World) {
+    let parents: Vec<_> = world
+        .query_filtered::<(
+            Entity,
+            Option<&Tower>,
+            Option<&Health>,
+            Option<&RawElement>,
+            Option<&Allegiance>,
+        ), Or<(With<Tower>, With<RawElementDeposit>)>>()
+        .iter(world)
+        .map(|(entity, tower, health, raw, allegiance)| {
+            (
+                entity,
+                tower.is_some(),
+                health_count(health),
+                raw.map_or(0, |raw| raw.0 as usize),
+                allegiance.copied(),
+            )
+        })
+        .collect();
+    for (parent, tower, health, raw, allegiance) in parents {
+        let stack = Stack {
+            count: if tower { health } else { raw },
+            columns: if tower { 4 } else { 1 },
+            spacing: if tower {
+                Vec3::splat(0.68)
+            } else {
+                Vec3::new(0.0, 0.24, 0.0)
+            },
+        };
+        world.entity_mut(parent).insert(stack);
+        let assets = world.resource::<VisualAssets>();
+        let mesh = if tower {
+            assets.tower.clone()
+        } else {
+            assets.deposit.clone()
+        };
+        let material = allegiance
+            .and_then(|a| world.get::<Faction>(a.0))
+            .map_or_else(|| assets.raw.clone(), |f| assets.materials[f.index].clone());
+        let beacon_mesh = assets.energy.clone();
+        let children: Vec<_> = world
+            .get::<Children>(parent)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| world.get::<StackPiece>(*child).is_some())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for child in children.iter().skip(stack.count) {
+            world.despawn(*child);
+        }
+        for index in 0..stack.count {
+            let transform = stack.transform(index);
+            if let Some(child) = children.get(index) {
+                world
+                    .entity_mut(*child)
+                    .insert((transform, MeshMaterial3d(material.clone())));
+            } else {
+                world.spawn((
+                    Name::new("Stack primitive"),
+                    EntityKind::StackVisual,
+                    StackPiece,
+                    ChildOf(parent),
+                    Mesh3d(mesh.clone()),
+                    MeshMaterial3d(material.clone()),
+                    transform,
+                ));
+            }
+        }
+        if tower {
+            let beacon = world.get::<Children>(parent).and_then(|children| {
+                children
+                    .iter()
+                    .find(|child| world.get::<TowerBeacon>(*child).is_some())
+            });
+            let transform = Transform::from_xyz(0.0, health.div_ceil(16) as f32 * 0.68 + 0.45, 0.0)
+                .with_scale(Vec3::splat(2.0));
+            if let Some(beacon) = beacon {
+                world
+                    .entity_mut(beacon)
+                    .insert((transform, MeshMaterial3d(material)));
+            } else {
+                world.spawn((
+                    Name::new("Tower beacon"),
+                    EntityKind::TowerBeacon,
+                    TowerBeacon,
+                    ChildOf(parent),
+                    Mesh3d(beacon_mesh),
+                    MeshMaterial3d(material),
+                    transform,
+                ));
+            }
+        }
+    }
+}
+fn laser_transform(source: Vec3, target: Vec3) -> Option<Transform> {
+    let delta = target - source;
+    let length = delta.length();
+    (length.is_finite() && length > 0.001).then(|| Transform {
+        translation: (source + target) * 0.5,
+        rotation: Quat::from_rotation_arc(Vec3::X, delta / length),
+        scale: Vec3::new(length, 0.09, 0.09),
+    })
+}
+fn sync_attack_lasers(world: &mut World) {
+    let trails: Vec<_> = world
+        .query::<(Entity, &AttackTrail, &Position)>()
+        .iter(world)
+        .map(|(entity, trail, position)| (entity, *trail, *position))
+        .collect();
+    for (entity, trail, position) in trails {
+        let transform = world.get::<Position>(trail.tower).and_then(|source| {
+            laser_transform(
+                Vec3::new(
+                    source.0.x,
+                    tower_top(world.get::<Health>(trail.tower)) + 0.45,
+                    source.0.y,
+                ),
+                Vec3::new(position.0.x, 0.4, position.0.y),
+            )
+        });
+        let assets = world.resource::<VisualAssets>();
+        let mesh = assets.link.clone();
+        let material = world
+            .get::<Allegiance>(trail.tower)
+            .and_then(|a| world.get::<Faction>(a.0))
+            .map_or_else(|| assets.raw.clone(), |f| assets.materials[f.index].clone());
+        world.entity_mut(entity).insert((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            transform.unwrap_or_default(),
+            if transform.is_some() {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            },
+        ));
+    }
+}
+
 // Eight pieces per tier keep each unit count visible without scaling by inventory.
 fn donut_transform(index: usize, tower: bool) -> Transform {
     let angle = (index % 8) as f32 * std::f32::consts::TAU / 8.0;
     let radius = if tower { 1.3 } else { 0.65 };
-    let base = if tower { 4.05 } else { 1.15 };
+    let base = if tower { 1.0 } else { 1.15 };
     Transform::from_xyz(
         angle.cos() * radius,
         base + (index / 8) as f32 * 0.24,
@@ -339,10 +514,15 @@ fn sync_donut_visuals(world: &mut World) {
         for child in children.drain(retained..) {
             world.despawn(child);
         }
+        let offset = if tower {
+            tower_top(world.get::<Health>(parent)) + 0.6
+        } else {
+            0.0
+        };
         for (index, child) in children.iter().enumerate() {
-            world
-                .entity_mut(*child)
-                .insert(donut_transform(index, tower));
+            let mut transform = donut_transform(index, tower);
+            transform.translation.y += offset;
+            world.entity_mut(*child).insert(transform);
         }
         for index in children.len()..count {
             world.spawn((
@@ -352,7 +532,11 @@ fn sync_donut_visuals(world: &mut World) {
                 ChildOf(parent),
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material.clone()),
-                donut_transform(index, tower),
+                {
+                    let mut transform = donut_transform(index, tower);
+                    transform.translation.y += offset;
+                    transform
+                },
             ));
         }
     }
@@ -454,7 +638,7 @@ fn sync_visuals(
     for (position, allegiance, tower, mut transform, mut material) in &mut entities {
         transform.translation = Vec3::new(
             position.0.x,
-            if tower.is_some() { 3.5 } else { 0.77 },
+            if tower.is_some() { 0.0 } else { 0.77 },
             position.0.y,
         );
         if let Ok(faction) = factions.get(allegiance.0) {
@@ -468,17 +652,15 @@ fn sync_visuals(
 fn attach_resource_visuals(
     mut commands: Commands,
     assets: Res<VisualAssets>,
-    deposits: Query<Entity, (With<RawElementDeposit>, Without<Mesh3d>)>,
+    deposits: Query<Entity, (With<RawElementDeposit>, Without<Transform>)>,
     trails: Query<(Entity, &Allegiance), (With<Trail>, Without<Mesh3d>)>,
     links: Query<(Entity, &Allegiance), (With<Link>, Without<Mesh3d>)>,
     factions: Query<&Faction>,
 ) {
     for entity in &deposits {
-        commands.entity(entity).insert((
-            Mesh3d(assets.deposit.clone()),
-            MeshMaterial3d(assets.raw.clone()),
-            Transform::default(),
-        ));
+        commands
+            .entity(entity)
+            .insert((MeshMaterial3d(assets.raw.clone()), Transform::default()));
     }
     for (entity, allegiance) in &trails {
         if let Ok(faction) = factions.get(allegiance.0) {
@@ -524,7 +706,7 @@ fn sync_gathering_visuals(
 ) {
     for (position, mut transform) in &mut deposits {
         transform.translation = Vec3::new(position.0.x, 0.35, position.0.y);
-        transform.scale = Vec3::splat(0.55);
+        transform.scale = Vec3::ONE;
     }
     for (position, trail, allegiance, mut transform, mut material) in &mut trails {
         transform.translation = Vec3::new(position.0.x, 0.1, position.0.y);
@@ -850,7 +1032,7 @@ mod tests {
             assert!((ninth.translation.y - first.translation.y - 0.24).abs() < 0.0001);
             assert_eq!(first.translation.x, ninth.translation.x);
             assert_eq!(first.translation.z, ninth.translation.z);
-            assert!(first.translation.y > if tower { 3.5 } else { 0.77 });
+            assert!(first.translation.y > if tower { 0.0 } else { 0.77 });
             assert_ne!(first.translation, donut_transform(1, tower).translation);
         }
     }
@@ -909,6 +1091,8 @@ mod tests {
             Update,
             (
                 attach_visuals,
+                sync_stacks,
+                sync_attack_lasers,
                 sync_donut_visuals,
                 sync_energy_orbs,
                 attach_projectile_visuals,
@@ -939,6 +1123,10 @@ mod tests {
             .world_mut()
             .spawn((
                 Tower { slot: 0 },
+                Health {
+                    current: 19.0,
+                    max: 20.0,
+                },
                 Position(Vec2::X * 2.0),
                 Allegiance(own),
                 RawElement(9),
@@ -987,7 +1175,61 @@ mod tests {
                 Position(Vec2::new(4.0, 8.0)),
             ))
             .id();
+        let attack = app
+            .world_mut()
+            .spawn((
+                AttackTrail {
+                    tower,
+                    assigned: minion,
+                    target: Some(minion),
+                },
+                Position(Vec2::new(8.0, 3.0)),
+            ))
+            .id();
         app.world_mut().run_schedule(Update);
+        let pieces = |world: &mut World, parent: Entity| -> Vec<Entity> {
+            world
+                .query_filtered::<(Entity, &ChildOf), With<StackPiece>>()
+                .iter(world)
+                .filter_map(|(entity, child)| (child.parent() == parent).then_some(entity))
+                .collect()
+        };
+        assert_eq!(pieces(app.world_mut(), tower).len(), 19);
+        assert_eq!(pieces(app.world_mut(), deposit).len(), 5);
+        let stack = *app.world().get::<Stack>(tower).unwrap();
+        assert_eq!(stack.count, 19);
+        assert!(stack.transform(16).translation.y > stack.transform(0).translation.y);
+        let beam = *app.world().get::<Transform>(attack).unwrap();
+        assert!(
+            beam.transform_point(Vec3::NEG_X * 0.5)
+                .distance(Vec3::new(2.0, 1.81, 0.0))
+                < 0.0001
+        );
+        assert!(
+            beam.transform_point(Vec3::X * 0.5)
+                .distance(Vec3::new(8.0, 0.4, 3.0))
+                < 0.0001
+        );
+        app.world_mut().get_mut::<Position>(attack).unwrap().0 = Vec2::new(9.0, 4.0);
+        app.world_mut().get_mut::<Health>(tower).unwrap().current = 1.0;
+        app.world_mut().get_mut::<RawElement>(deposit).unwrap().0 = 2;
+        app.world_mut().run_schedule(Update);
+        assert_eq!(pieces(app.world_mut(), tower).len(), 1);
+        let deposit_pieces = pieces(app.world_mut(), deposit);
+        assert_eq!(deposit_pieces.len(), 2);
+        let beam = app.world().get::<Transform>(attack).unwrap();
+        assert!(
+            beam.transform_point(Vec3::X * 0.5)
+                .distance(Vec3::new(9.0, 0.4, 4.0))
+                < 0.0001
+        );
+        assert!(
+            beam.transform_point(Vec3::NEG_X * 0.5)
+                .distance(Vec3::new(2.0, 1.13, 0.0))
+                < 0.0001
+        );
+        app.world_mut().despawn(attack);
+        assert!(app.world().get_entity(attack).is_err());
         assert_eq!(
             app.world()
                 .get::<Transform>(projectile)
@@ -1119,8 +1361,28 @@ mod tests {
                 .iter()
                 .all(|child| app.world().get_entity(*child).is_err())
         );
+        app.world_mut().despawn(deposit);
+        assert!(
+            deposit_pieces
+                .iter()
+                .all(|piece| app.world().get_entity(*piece).is_err())
+        );
+        let tower_pieces = pieces(app.world_mut(), tower);
+        let beacon = app
+            .world()
+            .get::<Children>(tower)
+            .unwrap()
+            .iter()
+            .find(|child| app.world().get::<TowerBeacon>(*child).is_some())
+            .unwrap();
         let remaining = donuts(app.world_mut(), tower);
         app.world_mut().despawn(tower);
+        assert!(
+            tower_pieces
+                .iter()
+                .all(|piece| app.world().get_entity(*piece).is_err())
+        );
+        assert!(app.world().get_entity(beacon).is_err());
         assert!(
             remaining
                 .iter()

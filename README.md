@@ -14,31 +14,37 @@ The inspector queries the live ECS world. Cycle kind/faction filters, include en
 
 ## Simulation
 
-Each tower begins as its own faction. Towers spawn one minion every two seconds, capped at 100 living minions per origin tower. Minions move freely, spread toward the frontline and attack nearby rivals. Combat damage is simultaneous. Captured towers restore health and begin producing for their conqueror; existing armies keep their original faction. Controlling all five towers wins.
+Each tower begins as its own faction. Each tower starts with three minions and no rawElement stock. Five delivered rawElement create one new minion, capped at 100 living minions per origin tower; stock is retained while capped. Minions gather first and attack nearby rivals without chasing or stopping. Combat damage is simultaneous. Captured towers restore health and begin producing for their conqueror; existing armies keep their original faction. Controlling all five towers wins.
 
 Territory reflects current radial influence, with soft borders and neutral ground where no army or tower is present. It is not permanent paint or a tile movement system. The initial numerical balance is intentionally simple and configurable in `SimulationConfig`.
 
 | Faction | Color |
 |---|---|
-| Orthanc | Orange `#E69F00` |
-| Minas Morgul | Green `#009E73` |
-| White Tower of Minas Tirith | Sky blue `#56B4E9` |
-| Barad-dûr | Vermilion `#D55E00` |
-| Tower of Cirith Ungol | Purple `#CC79A7` |
+| Orthanc | Orange `#F5901E` |
+| Minas Morgul | Blue `#1E83F5` |
+| Minas Tirith | Purple `#901EF5` |
+| Barad-dur | Green `#0BEF84` |
+| Cirith Ungol | Yellow `#EFF51E` |
+
+## RawElement, vision and trails
+
+Thirty neutral torus-shaped deposits each start with 5–10 rawElement, determined by the match seed. Minions carry one unit per trip and deliver to the closest friendly tower selected when collecting. Exhausted donuts disappear and never recharge. Death drops carried rawElement as a one-unit donut; captured tower stock belongs to the conqueror.
+
+Every minion has a 15-unit circular field of vision. It seeks visible deposits first, then follows visible friendly trails toward their source; otherwise it explores randomly. Only friendly tower locations are globally known for delivery. Resource, enemy and trail knowledge is not shared between minions. The spectator can still see the entire map.
+
+Carriers leave faction-colored trail markers every two world units. These fade over 30 simulation seconds and remain after delivery or death. Followers traverse only visible markers toward the source, never obtaining remote deposit locations from trail metadata.
+
+The inspector shows rawElement inventory, gathering state, vision radius and trail lifetime. Tower stock appears in the HUD. Pause freezes trail decay, speed scales it, and restart restores the original deposit quantities and three minions per tower. Supplies are finite for the match.
 
 ## Energy and supply
 
-Thirty neutral torus-shaped pickups are scattered using the match seed. Each holds one energy, stays in place when collected, and recharges after five simulation seconds. Bright pickups are ready; dim ones are recharging.
+Minions start with five energy and can store at most five. Each successful attack costs one. Gathering continues at zero energy; donuts no longer provide combat energy.
 
-Minions start with five energy and can store at most five. Each successful attack costs one. Empty minions seek nearby charged pickups or return toward a friendly supply network; movement and territory influence remain active.
-
-Straight faction-colored lines are actual Link entities. They connect friendly minions into tower-rooted branches, with at most 15 world units per link. Every five simulation seconds, each tower or connected minion sends one energy total to an eligible child, rotating fairly. Towers supply unlimited energy; minions spend their stored energy, including their last point. Transfers happen simultaneously, so incoming energy cannot travel multiple links in one pulse. Full recipients are skipped.
-
-Inspect minions for energy reserves, pickups for recharge state, and links for endpoint IDs. Pause and speed controls affect energy timers; restart resets all energy state and recreates the same pickup positions. See the [energy milestone](https://github.com/tharak/lord-of-towers/milestone/2) and [energy ECS contracts](docs/energy-contracts.md).
+Straight faction-colored lines are actual Link entities. They connect friendly minions into tower-rooted branches, with at most 15 world units per link. Every five simulation seconds, each tower or connected minion sends one energy total to an eligible child, rotating fairly. Towers supply unlimited energy; minions spend their stored energy, including their last point. Transfers happen simultaneously, so incoming energy cannot travel multiple links in one pulse. Full recipients are skipped. Links do not share vision.
 
 ## Architecture and collaboration
 
-See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/1). Simulation, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
+See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [gathering contracts](docs/gathering-contracts.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/3). Simulation, gathering, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
 
 ## Development
 
@@ -56,4 +62,4 @@ Open http://127.0.0.1:4173/lord-of-towers/. The script installs the wasm-bindgen
 
 Routine testing runs in **GitHub Actions**, not on developer machines. Every PR checks formatting, Clippy, headless gameplay tests, a release WASM build, and Chromium/Firefox smoke tests. Main deploys only after those checks pass; a further smoke test checks the actual Pages URL. Main, scheduled, and manual runs include an extended population-bound simulation. Browser failures retain screenshots and traces as workflow artifacts.
 
-Visual quality can be reviewed directly on Pages. No custom models, external textures, multiplayer, persistence, mobile controls or economy are included in this prototype.
+Visual quality can be reviewed directly on Pages. No custom models, external textures, multiplayer, persistence, or mobile controls are included in this prototype.

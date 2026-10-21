@@ -4,9 +4,9 @@
 
 Simulation uses Position(Vec2) on X/Z; Y is visual height. Faction index is resolved through Allegiance's faction entity. EntityKind + Name classify application entities; MatchEntity marks everything recreated on restart.
 
-InfluenceField must expose `sample(position: Vec2) -> [f32; 5]`, `territory_percentages() -> [f32; 5]`, public `revision: u64`, and `half_extent: f32`. Influence sampling runs in SimSet::Influence, at 10 Hz simulation time. Presence uses a finite radial falloff, with strongest influence controlling territory and ties contested. Presentation reads InfluenceField to color ground; AI may query sample for target scoring.
+InfluenceField must expose `sample(position: Vec2) -> [f32; 5]`, `territory_percentages() -> [f32; 5]`, public `revision: u64`, and `half_extent: f32`. Influence sampling runs in SimSet::Influence, at 10 Hz simulation time. Presence uses a finite radial falloff, with strongest influence controlling territory and ties contested. Presentation reads InfluenceField to color ground; gathering navigation uses only local vision and known friendly delivery towers.
 
-SimulationPlugin configures ordered SimSet chain Spawn → Index → Target → Movement → Combat → Capture → Energy → Influence → Victory, gated by simulation_running. Fixed time runs at 30 Hz. simulation_delta applies speed. Restart is serviced in PreUpdate even while paused, with deferred despawns flushed before fixed simulation and presentation Update. This prevents visual commands from targeting entities removed by a restart. MatchState is the control interface.
+SimulationPlugin configures ordered SimSet chain Spawn → Index → Target → Movement → Combat → Capture → Gathering → PaidSpawn → Energy → Influence → Victory, gated by simulation_running. Fixed time runs at 30 Hz. simulation_delta applies speed. Restart is serviced in PreUpdate even while paused, with deferred despawns flushed before fixed simulation and presentation Update. This prevents visual commands from targeting entities removed by a restart. MatchState is the control interface.
 
 Use a 100×100 world, five towers on a radius-32 circle. Initial balance defaults live in SimulationConfig. Independent seeded random choices break symmetry without nondeterministic test expectations.
 
@@ -14,4 +14,4 @@ Presentation builds a shared primitive mesh/material palette and adds visuals to
 
 Inspector exposes a public `InspectorState { pub open: bool }` resource for presentation's button. Avoid browser-blocked F3 as the only entrypoint.
 
-EnergyPlugin owns pickup recharge/collection and supply graph/transfer systems in the Energy phase. See [energy contracts](energy-contracts.md) for component interfaces, deterministic topology and pulse semantics. Energy entities participate in match reset and the live entity catalog.
+GatheringPlugin owns finite deposits, local navigation, delivery, and fading trails. See [gathering contracts](gathering-contracts.md). EnergyPlugin owns only supply graph/transfer systems in the Energy phase. See [energy contracts](energy-contracts.md) for component interfaces, deterministic topology and pulse semantics. Energy entities participate in match reset and the live entity catalog.

@@ -1,3 +1,7 @@
+# Energy network contracts (historical pickup design superseded)
+
+The rawElement implementation supersedes all pickup/recharge, energy-seeking AI, timed spawning and pickup browser hooks below. Current gathering interfaces are in [gathering contracts](gathering-contracts.md). Network topology, energy costs, pulse snapshots and fairness remain unchanged.
+
 # Energy and supply contracts
 
 Lead owns model.rs and this contract; coordinate changes before editing shared interfaces. Tests run in GitHub Actions. No local test/build execution; rustfmt allowed.

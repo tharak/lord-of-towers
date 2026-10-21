@@ -46,7 +46,7 @@
 |---|---|
 | `SimulationConfig` | Default world size, seed, vision, gathering, combat, spawning, trail and energy tuning. |
 | `AttackOrderRequests` | Pending screen-to-world map clicks/touches consumed by the next simulation step. |
-| `CancelAttackOrderRequests` | Pending right-click ground points used to remove the nearest player attack trail. |
+| `CancelAttackOrderRequests` | Pending right-click ground points used to remove the nearest player attack trail within two world units of its destination. |
 | `MatchState` | Pause, speed, hidden-tab, elapsed time, winner and restart request. |
 | `FactionEntities` | Five live faction entity IDs for deterministic ownership lookup. |
 | `RawElementEconomy` | Initial resource total and cumulative spending; verifies that live deposits, cargo and stock plus spending equal the initial total. |

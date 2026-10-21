@@ -11,7 +11,7 @@
 | **stack** | A generic visual count/layout for repeated primitives. It draws one health cube per tower health point and one map donut per deposit rawElement unit. | `Stack` component with `StackVisual` children |
 | **minion** | A mobile faction unit with vision, combat energy, a gathering route, and at most one carried rawElement. | `Minion` component |
 | **trail** | A temporary faction-owned breadcrumb left by a carrier. Visible allies follow decreasing sequence numbers toward a deposit. | `Trail` entity/component |
-| **attack trail** | A player-placed order for one Orthanc minion. It follows a clicked hostile unit or holds a clicked map position; Orthanc points a laser at it. Right-click removes the nearest player trail. | `AttackTrail` entity/component and minion `AttackOrder` |
+| **attack trail** | A player-placed order for one Orthanc minion. It follows a clicked hostile unit or holds a clicked map position; Orthanc points a laser at it. Right-click near the laser endpoint removes the nearest attack trail in range. | `AttackTrail` entity/component and minion `AttackOrder` |
 | **link** | A live tower-rooted supply edge that transfers combat energy every five simulation seconds. Links do not share vision or rawElement. | `Link` entity/component |
 | **energy** | Combat/forwarding reserve. An attack costs one; towers are unlimited supply roots. It is separate from rawElement. | `EnergyStore` and `EnergyClock` |
 | **energy orb** | A small sphere around a minion, representing one stored energy point. It carries no gameplay energy itself. | `EnergyOrbVisual` entity kind; Bevy `Sphere` mesh |

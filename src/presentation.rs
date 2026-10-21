@@ -207,7 +207,7 @@ fn setup(
                 Name::new("Camera instructions"),
                 EntityKind::Ui,
                 Text::new(
-                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nLeft click/tap: order   Right click: cancel trail",
+                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nLeft click/tap: order   Right click near laser end: cancel",
                 ),
                 TextFont {
                     font_size: FontSize::Px(12.0),

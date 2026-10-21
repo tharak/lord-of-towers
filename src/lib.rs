@@ -5,6 +5,7 @@ pub mod energy;
 pub mod influence;
 pub mod inspector;
 pub mod model;
+pub mod orders;
 pub mod presentation;
 pub mod simulation;
 

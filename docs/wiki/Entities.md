@@ -5,9 +5,12 @@ Every application-created entity has `Name` and `EntityKind`. Gameplay entities 
 | Entity kind | Purpose and main components | Creation and removal |
 |---|---|---|
 | `Faction` | Faction identity and index. | Five per match; replaced on restart. |
-| `Tower` | Capturable root with `Allegiance`, `Position`, `Health`, `Spawner`, `RawElement` stock, `ForwardingCursor`, `InfluenceEmitter`. | Five per match. Capture preserves entity and stock. |
+| `Tower` | Destructible root with `Allegiance`, `Position`, `Health`, `Spawner`, `RawElement` stock, `ForwardingCursor`, `InfluenceEmitter`, and visual `Stack`. | Five per match. At zero health it despawns and drops its stock. |
 | `Minion` | Mobile unit with `Allegiance`, `OriginTower`, `Position`, `Health`, `Movement`, `Attack`, `EnergyStore`, `RawElement` cargo, `Vision`, `GatheringState`, optional `TrailEmitter` and `SupplyConnection`. | Three start at each tower; paid spawns cost five rawElement. Death drops cargo and despawns the unit. |
-| `RawElementDeposit` | Neutral collectable donut with `Position` and `RawElement` quantity. | Thirty seeded deposits plus cargo drops; removed at zero quantity; no recharge. |
+| `RawElementDeposit` | Neutral collectable stack of donuts with `Position`, `RawElement` quantity, and visual `Stack`. | Thirty seeded deposits plus cargo and tower-stock drops; removed at zero quantity; no recharge. |
+| `AttackTrail` | Player order with issuing tower, assigned minion, optional moving enemy target, and destination `Position`. Drawn as a tower-to-target laser. | Created by mouse/touch map input; replaced on reassignment, removed with tower/restart. |
+| `StackVisual` | One child cube in a tower-health stack or torus in a map-deposit stack. | Reconciled to its parent's current health or rawElement count. |
+| `TowerBeacon` | Sphere at the top of a tower-health stack; laser origin and support for donut crown. | One per living tower, removed with parent. |
 | `DonutVisual` | One torus crown piece per rawElement on its parent tower or minion. Holds no inventory. | Visual child added/removed as parent inventory changes; removed with parent. |
 | `EnergyOrbVisual` | One small sphere per point in its parent minion's `EnergyStore`. Holds no energy itself. | Visual child added/removed as stored energy changes; removed with parent. |
 | `EnergyProjectile` | Fired energy sphere with `Position`, `Allegiance`, target, damage, speed and remaining lifetime. | Spawned by an attack; follows a live hostile target; removed on impact, lost target, timeout or restart. |

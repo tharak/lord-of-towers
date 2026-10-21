@@ -1,5 +1,7 @@
 # RawElement gathering implementation contracts
 
+Historical implementation contract: tower capture references below are superseded by tower destruction in the current simulation. See the [entity catalog](entity-catalog.md).
+
 Tests/builds run only on GitHub Actions. Local formatting allowed. Each agent owns its files and commits on its branch, no push/merge. Shared model.rs owned by lead; request changes if needed.
 
 ## Ownership and interfaces

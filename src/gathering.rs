@@ -173,6 +173,9 @@ fn navigate(world: &mut World) {
         if world.get::<Movement>(entity).is_none() {
             continue;
         }
+        if world.get::<AttackOrder>(entity).is_some() {
+            continue;
+        }
         if cargo.0 > 0 {
             let previous = match state {
                 GatheringState::Returning { tower } => tower,
@@ -329,7 +332,10 @@ fn collect(world: &mut World) {
             continue;
         };
         let mut candidates: Vec<_> = world
-            .query_filtered::<(Entity, &Position, &RawElement, &Vision), With<Minion>>()
+            .query_filtered::<
+                (Entity, &Position, &RawElement, &Vision),
+                (With<Minion>, Without<AttackOrder>),
+            >()
             .iter(world)
             .filter_map(|(e, p, a, v)| {
                 let d = p.0.distance_squared(position.0);

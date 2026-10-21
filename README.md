@@ -1,6 +1,6 @@
 # Lord of Towers
 
-A Rust + Bevy ECS spectator simulation. Five towers spawn armies, project territory through their presence, fight, and capture each other. All art is made from Bevy primitive meshes.
+A Rust + Bevy ECS strategy simulation. Five towers spawn armies, project territory through their presence, fight, and can be destroyed. All art is made from Bevy primitive meshes.
 
 **Play:** https://tharak.github.io/lord-of-towers/
 
@@ -14,7 +14,9 @@ The inspector queries the live ECS world. Cycle kind/faction filters, include en
 
 ## Simulation
 
-Each tower begins as its own faction. Each tower starts with three minions and no rawElement stock. Five delivered rawElement create one new minion, capped at 100 living minions per origin tower; stock is retained while capped. Minions gather first and attack nearby rivals without chasing or stopping. Enemy minions take priority over towers when both are in attack range. Combat damage occurs when fired energy spheres hit; impacts in one fixed step resolve together. Captured towers restore health and begin producing for their conqueror; existing armies keep their original faction. Controlling all five towers wins.
+Each tower begins as its own faction. Each tower starts with three minions and no rawElement stock. Five delivered rawElement create one new minion, capped at 100 living minions per origin tower; stock is retained while capped. Minions gather and attack nearby rivals. Enemy minions take priority over towers when both are in attack range. Combat damage occurs when fired energy spheres hit; impacts in one fixed step resolve together. Towers are destroyed at zero health and drop their stock. The last tower standing wins.
+
+Click or touch a point on the battlefield to place an attack trail from the closest tower. Its closest minion without an order goes there; if all its minions have orders, the closest is reassigned. Click an enemy minion or tower to follow it, or click open ground to hold that position and fire at nearby enemies. A laser from the tower beacon shows the live destination. Ordered minions pause gathering while they follow their order.
 
 Territory reflects current radial influence, with soft borders and neutral ground where no army or tower is present. It is not permanent paint or a tile movement system. The initial numerical balance is intentionally simple and configurable in `SimulationConfig`.
 
@@ -28,23 +30,23 @@ Territory reflects current radial influence, with soft borders and neutral groun
 
 ## RawElement, vision and trails
 
-Thirty neutral torus-shaped deposits each start with 5–10 rawElement, determined by the match seed. Minions carry one unit per trip and deliver to the closest friendly tower selected when collecting. Exhausted donuts disappear and never recharge. Death drops carried rawElement as a one-unit donut; captured tower stock belongs to the conqueror.
+Thirty neutral deposits each start with 5–10 rawElement, determined by the match seed. Each unit is shown as one donut in a vertical stack. Minions carry one unit per trip and deliver to the closest friendly tower selected when collecting. Exhausted stacks disappear and never recharge. Minion death drops carried rawElement; tower destruction drops remaining stock as a collectable deposit.
 
 Every minion has a 15-unit circular field of vision. It seeks visible deposits first, then follows visible friendly trails toward their source; otherwise it explores randomly. Only friendly tower locations are globally known for delivery. Resource, enemy and trail knowledge is not shared between minions. The spectator can still see the entire map.
 
 Carriers leave faction-colored trail markers every two world units. These fade over 30 simulation seconds and remain after delivery or death. Followers traverse only visible markers toward the source, never obtaining remote deposit locations from trail metadata.
 
-One visible donut per rawElement unit forms a crown above each carrying minion or stocked tower, stacked in eight-piece tiers. The debug HUD still shows numeric stock; the inspector shows exact inventory, gathering state, vision radius and trail lifetime. Pause freezes trail decay, speed scales it, and restart restores the original deposit quantities and three minions per tower. Supplies are finite for the match.
+One visible donut per rawElement unit forms a crown above each carrying minion or stocked tower, stacked in eight-piece tiers. Towers use vertical stacks of cubes, one per health point, with a sphere beacon and donut crown above. The debug HUD still shows numeric stock; the inspector shows exact inventory, gathering state, vision radius and trail lifetime. Pause freezes trail decay, speed scales it, and restart restores the original deposit quantities and three minions per tower. Supplies are finite for the match.
 
 ## Energy and supply
 
-Minions start with five energy and can store at most five. One small sphere circles each minion per stored energy point. Attacking spends one energy immediately and fires a sphere at the target; damage occurs when it hits. Shots fizzle if their target disappears or becomes friendly. Gathering continues at zero energy; donuts never provide combat energy.
+Minions start with five energy and can store at most five. One small sphere circles each minion per stored energy point. Attacking spends one energy immediately and fires a sphere at the target; damage occurs when it hits. Minions stop for one simulation second when they shoot, and their longer attack range lets them defend an ordered position. Shots fizzle if their target disappears or becomes friendly. Gathering continues at zero energy; donuts never provide combat energy.
 
 Straight faction-colored lines are actual Link entities. They connect friendly minions into tower-rooted branches, with at most 15 world units per link. Every five simulation seconds, each tower or connected minion sends one energy total to an eligible child, rotating fairly. Towers supply unlimited energy; minions spend their stored energy, including their last point. Transfers happen simultaneously, so incoming energy cannot travel multiple links in one pulse. Full recipients are skipped. Links do not share vision.
 
 ## Architecture and collaboration
 
-See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [shared nomenclature on the GitHub wiki](https://github.com/tharak/lord-of-towers/wiki), [gathering contracts](docs/gathering-contracts.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/5). Simulation, gathering, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
+See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [shared nomenclature on the GitHub wiki](https://github.com/tharak/lord-of-towers/wiki), [gathering contracts](docs/gathering-contracts.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/6). Simulation, orders, gathering, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
 
 ## Development
 

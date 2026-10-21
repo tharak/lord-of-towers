@@ -44,7 +44,12 @@ impl Plugin for SimulationPlugin {
             .add_systems(FixedUpdate, move_minions.in_set(SimSet::Movement))
             .add_systems(
                 FixedUpdate,
-                (rebuild_index, collect_damage)
+                (
+                    rebuild_index,
+                    clear_pending_damage,
+                    advance_projectiles,
+                    collect_damage,
+                )
                     .chain()
                     .in_set(SimSet::Combat),
             )
@@ -401,12 +406,52 @@ fn move_minions(
     }
 }
 
+fn clear_pending_damage(mut pending: ResMut<PendingDamage>) {
+    pending.0.clear();
+}
+
+fn advance_projectiles(
+    mut commands: Commands,
+    time: Res<Time<Fixed>>,
+    state: Res<MatchState>,
+    factions: Query<&Faction>,
+    targets: Query<(&Position, &Allegiance, &Health), Without<EnergyProjectile>>,
+    mut projectiles: Query<(Entity, &mut Position, &Allegiance, &mut EnergyProjectile)>,
+    mut pending: ResMut<PendingDamage>,
+) {
+    let dt = simulation_delta(&time, &state);
+    for (entity, mut position, owner, mut projectile) in &mut projectiles {
+        let Ok((target_position, target_owner, health)) = targets.get(projectile.target) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if target_owner == owner || health.current <= 0.0 || projectile.remaining <= 0.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let offset = target_position.0 - position.0;
+        let travel = projectile.speed.max(0.0) * dt.min(projectile.remaining);
+        if offset.length() <= travel {
+            if let Ok(faction) = factions.get(owner.0) {
+                pending.0.entry(projectile.target).or_default()[faction.index] += projectile.damage;
+            }
+            commands.entity(entity).despawn();
+        } else {
+            position.0 += offset.normalize_or_zero() * travel;
+            projectile.remaining -= dt;
+            if projectile.remaining <= 0.0 {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
 fn collect_damage(
+    mut commands: Commands,
     time: Res<Time<Fixed>>,
     state: Res<MatchState>,
     spatial: Res<SpatialIndex>,
     factions: Query<&Faction>,
-    mut pending: ResMut<PendingDamage>,
     mut attackers: Query<
         (
             &Position,
@@ -419,7 +464,6 @@ fn collect_damage(
     >,
     config: Res<SimulationConfig>,
 ) {
-    pending.0.clear();
     let dt = simulation_delta(&time, &state);
     for (position, faction, mut attack, mut energy, vision) in &mut attackers {
         attack.remaining = (attack.remaining - dt).max(0.0);
@@ -452,7 +496,19 @@ fn collect_damage(
                     .then(a.stable_id.cmp(&b.stable_id))
             });
         if let Some(target) = target {
-            pending.0.entry(target.entity).or_default()[faction.1] += attack.damage;
+            commands.spawn((
+                Name::new("Energy projectile"),
+                EntityKind::EnergyProjectile,
+                MatchEntity,
+                Position(position.0),
+                Allegiance(faction.0),
+                EnergyProjectile {
+                    target: target.entity,
+                    damage: attack.damage,
+                    speed: config.projectile_speed,
+                    remaining: config.projectile_lifetime,
+                },
+            ));
             attack.remaining = attack.cooldown;
             energy.current -= config.attack_energy_cost;
         }
@@ -689,6 +745,83 @@ mod tests {
     }
 
     #[test]
+    fn projectiles_home_impact_once_and_fizzle_for_invalid_targets_or_timeout() {
+        let mut app = app();
+        let factions = app.world().resource::<FactionEntities>().0.clone();
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .advance_by(std::time::Duration::from_secs_f32(0.25));
+        let target = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(Vec2::X * 10.0),
+                Allegiance(factions[1]),
+                Health {
+                    current: 30.0,
+                    max: 30.0,
+                },
+            ))
+            .id();
+        let shot = app
+            .world_mut()
+            .spawn((
+                MatchEntity,
+                Position(Vec2::ZERO),
+                Allegiance(factions[0]),
+                EnergyProjectile {
+                    target,
+                    damage: 7.0,
+                    speed: 4.0,
+                    remaining: 4.0,
+                },
+            ))
+            .id();
+        let mut advance = Schedule::default();
+        advance.add_systems((clear_pending_damage, advance_projectiles).chain());
+        advance.run(app.world_mut());
+        assert_eq!(app.world().get::<Position>(shot).unwrap().0, Vec2::X);
+        assert!(app.world().resource::<PendingDamage>().0.is_empty());
+        assert_eq!(app.world().get::<Health>(target).unwrap().current, 30.0);
+        // The shot follows the target's new position and lands without overshoot.
+        app.world_mut().get_mut::<Position>(target).unwrap().0 = Vec2::new(1.0, 0.5);
+        advance.run(app.world_mut());
+        assert!(app.world().get_entity(shot).is_err());
+        assert_eq!(app.world().resource::<PendingDamage>().0[&target][0], 7.0);
+        let mut resolve = Schedule::default();
+        resolve.add_systems(resolve_damage);
+        resolve.run(app.world_mut());
+        assert_eq!(app.world().get::<Health>(target).unwrap().current, 23.0);
+        advance.run(app.world_mut());
+        assert!(app.world().resource::<PendingDamage>().0.is_empty());
+
+        for mode in 0..4 {
+            app.world_mut().get_mut::<Allegiance>(target).unwrap().0 =
+                if mode == 0 { factions[0] } else { factions[1] };
+            app.world_mut().get_mut::<Health>(target).unwrap().current =
+                if mode == 1 { 0.0 } else { 23.0 };
+            let missing = app.world_mut().spawn_empty().id();
+            app.world_mut().despawn(missing);
+            let shot = app
+                .world_mut()
+                .spawn((
+                    Position(Vec2::splat(100.0)),
+                    Allegiance(factions[0]),
+                    EnergyProjectile {
+                        target: if mode == 2 { missing } else { target },
+                        damage: 7.0,
+                        speed: 4.0,
+                        remaining: if mode == 3 { 0.1 } else { 4.0 },
+                    },
+                ))
+                .id();
+            advance.run(app.world_mut());
+            assert!(app.world().get_entity(shot).is_err());
+            assert!(app.world().resource::<PendingDamage>().0.is_empty());
+        }
+    }
+
+    #[test]
     fn combat_prioritizes_eligible_minions_then_distance_and_stable_id() {
         let mut app = app();
         let factions = app.world().resource::<FactionEntities>().0.clone();
@@ -752,11 +885,19 @@ mod tests {
         let mut combat = Schedule::default();
         combat.add_systems((rebuild_index, collect_damage).chain());
         combat.run(app.world_mut());
-        let damage = &app.world().resource::<PendingDamage>().0;
-        assert_eq!(damage.get(&preferred).unwrap()[0], 10.0);
-        for other in [tower, farther, tied] {
-            assert!(!damage.contains_key(&other));
-        }
+        let shots: Vec<_> = app
+            .world_mut()
+            .query::<&EnergyProjectile>()
+            .iter(app.world())
+            .copied()
+            .collect();
+        assert_eq!(shots.len(), 1);
+        assert_eq!(shots[0].target, preferred);
+        assert_eq!(shots[0].damage, 10.0);
+        let config = app.world().resource::<SimulationConfig>();
+        assert_eq!(shots[0].speed, config.projectile_speed);
+        assert_eq!(shots[0].remaining, config.projectile_lifetime);
+        assert!(app.world().resource::<PendingDamage>().0.is_empty());
         assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 4);
         assert_eq!(app.world().get::<Attack>(attacker).unwrap().remaining, 0.8);
 
@@ -774,14 +915,13 @@ mod tests {
             .unwrap()
             .remaining = 0.0;
         combat.run(app.world_mut());
-        assert_eq!(
-            app.world()
-                .resource::<PendingDamage>()
-                .0
-                .get(&tower)
-                .unwrap()[0],
-            10.0
+        assert!(
+            app.world_mut()
+                .query::<&EnergyProjectile>()
+                .iter(app.world())
+                .any(|shot| shot.target == tower)
         );
+        assert_eq!(count::<EnergyProjectile>(&mut app), 2);
         assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 3);
 
         // Without an eligible target, neither energy nor cooldown is spent.
@@ -794,6 +934,20 @@ mod tests {
         assert!(app.world().resource::<PendingDamage>().0.is_empty());
         assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 3);
         assert_eq!(app.world().get::<Attack>(attacker).unwrap().remaining, 0.0);
+        app.world_mut().despawn(attacker);
+        assert_eq!(count::<EnergyProjectile>(&mut app), 2);
+        // A shot has no ownership relationship to the entity that fired it.
+        app.world_mut().entity_mut(preferred).insert(Health {
+            current: 30.0,
+            max: 30.0,
+        });
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .advance_by(std::time::Duration::from_secs_f32(0.25));
+        let mut flight = Schedule::default();
+        flight.add_systems((clear_pending_damage, advance_projectiles, resolve_damage).chain());
+        flight.run(app.world_mut());
+        assert_eq!(app.world().get::<Health>(preferred).unwrap().current, 20.0);
     }
 
     #[test]
@@ -877,10 +1031,10 @@ mod tests {
         combat.run(app.world_mut());
         assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 4);
         assert!(
-            app.world()
-                .resource::<PendingDamage>()
-                .0
-                .contains_key(&target)
+            app.world_mut()
+                .query::<&EnergyProjectile>()
+                .iter(app.world())
+                .any(|shot| shot.target == target)
         );
         app.world_mut()
             .resource_mut::<Time<Fixed>>()

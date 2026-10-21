@@ -923,9 +923,7 @@ fn browser_state(
     clock: Res<EnergyClock>,
     energy_orbs: Query<(), With<EnergyOrbVisual>>,
     projectiles: Query<(), With<EnergyProjectile>>,
-    attack_trails: Query<(), With<AttackTrail>>,
-    stack_pieces: Query<(), With<StackPiece>>,
-    beacons: Query<(), With<TowerBeacon>>,
+    order_visuals: Query<&EntityKind, Or<(With<AttackTrail>, With<StackPiece>, With<TowerBeacon>)>>,
 ) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -986,10 +984,28 @@ fn browser_state(
             ("data-energy-orbs", energy_orbs.iter().count().to_string()),
             (
                 "data-attack-trails",
-                attack_trails.iter().count().to_string(),
+                order_visuals
+                    .iter()
+                    .filter(|kind| **kind == EntityKind::AttackTrail)
+                    .count()
+                    .to_string(),
             ),
-            ("data-stack-pieces", stack_pieces.iter().count().to_string()),
-            ("data-tower-beacons", beacons.iter().count().to_string()),
+            (
+                "data-stack-pieces",
+                order_visuals
+                    .iter()
+                    .filter(|kind| **kind == EntityKind::StackVisual)
+                    .count()
+                    .to_string(),
+            ),
+            (
+                "data-tower-beacons",
+                order_visuals
+                    .iter()
+                    .filter(|kind| **kind == EntityKind::TowerBeacon)
+                    .count()
+                    .to_string(),
+            ),
             (
                 "data-energy-projectiles",
                 projectiles.iter().count().to_string(),

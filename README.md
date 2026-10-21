@@ -34,7 +34,7 @@ Every minion has a 15-unit circular field of vision. It seeks visible deposits f
 
 Carriers leave faction-colored trail markers every two world units. These fade over 30 simulation seconds and remain after delivery or death. Followers traverse only visible markers toward the source, never obtaining remote deposit locations from trail metadata.
 
-The inspector shows rawElement inventory, gathering state, vision radius and trail lifetime. Tower stock appears in the HUD. Pause freezes trail decay, speed scales it, and restart restores the original deposit quantities and three minions per tower. Supplies are finite for the match.
+One visible donut per rawElement unit forms a crown above each carrying minion or stocked tower, stacked in eight-piece tiers. The debug HUD still shows numeric stock; the inspector shows exact inventory, gathering state, vision radius and trail lifetime. Pause freezes trail decay, speed scales it, and restart restores the original deposit quantities and three minions per tower. Supplies are finite for the match.
 
 ## Energy and supply
 
@@ -44,7 +44,7 @@ Straight faction-colored lines are actual Link entities. They connect friendly m
 
 ## Architecture and collaboration
 
-See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [gathering contracts](docs/gathering-contracts.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/3). Simulation, gathering, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
+See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [shared nomenclature on the GitHub wiki](https://github.com/tharak/lord-of-towers/wiki), [gathering contracts](docs/gathering-contracts.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/3). Simulation, gathering, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
 
 ## Development
 

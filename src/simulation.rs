@@ -441,10 +441,14 @@ fn collect_damage(
                         <= attack.range + if entry.tower { 2.0 } else { 0.0 }
             })
             .min_by(|a, b| {
-                position
-                    .0
-                    .distance_squared(a.position)
-                    .total_cmp(&position.0.distance_squared(b.position))
+                a.tower
+                    .cmp(&b.tower)
+                    .then_with(|| {
+                        position
+                            .0
+                            .distance_squared(a.position)
+                            .total_cmp(&position.0.distance_squared(b.position))
+                    })
                     .then(a.stable_id.cmp(&b.stable_id))
             });
         if let Some(target) = target {
@@ -682,6 +686,155 @@ mod tests {
         assert!(app.world().get_entity(minion).is_err());
         assert_eq!(count::<RawElementDeposit>(&mut app), deposits + 1);
         assert_eq!(total(&mut app), before);
+    }
+
+    #[test]
+    fn combat_prioritizes_eligible_minions_then_distance_and_stable_id() {
+        let mut app = app();
+        let factions = app.world().resource::<FactionEntities>().0.clone();
+        let center = Vec2::splat(1000.0);
+        let attacker = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center),
+                Allegiance(factions[0]),
+                Vision { radius: 3.0 },
+                EnergyStore {
+                    current: 5,
+                    capacity: 5,
+                },
+                Attack {
+                    damage: 10.0,
+                    range: 1.6,
+                    cooldown: 0.8,
+                    remaining: 0.0,
+                },
+            ))
+            .id();
+        let tower = app
+            .world_mut()
+            .spawn((
+                Tower { slot: 99 },
+                Position(center + Vec2::X * 0.25),
+                Allegiance(factions[1]),
+                SimulationId(100),
+            ))
+            .id();
+        let farther = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center + Vec2::X * 1.5),
+                Allegiance(factions[1]),
+                SimulationId(101),
+            ))
+            .id();
+        // Spawn the larger stable ID first so entity order cannot break the tie.
+        let tied = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center - Vec2::X),
+                Allegiance(factions[1]),
+                SimulationId(103),
+            ))
+            .id();
+        let preferred = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center + Vec2::X),
+                Allegiance(factions[1]),
+                SimulationId(102),
+            ))
+            .id();
+        let mut combat = Schedule::default();
+        combat.add_systems((rebuild_index, collect_damage).chain());
+        combat.run(app.world_mut());
+        let damage = &app.world().resource::<PendingDamage>().0;
+        assert_eq!(damage.get(&preferred).unwrap()[0], 10.0);
+        for other in [tower, farther, tied] {
+            assert!(!damage.contains_key(&other));
+        }
+        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 4);
+        assert_eq!(app.world().get::<Attack>(attacker).unwrap().remaining, 0.8);
+
+        // Cooldown prevents another strike even with eligible targets present.
+        combat.run(app.world_mut());
+        assert!(app.world().resource::<PendingDamage>().0.is_empty());
+        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 4);
+
+        // A visible minion outside attack range must not prevent tower fallback.
+        for minion in [preferred, farther, tied] {
+            app.world_mut().get_mut::<Position>(minion).unwrap().0 = center + Vec2::X * 2.0;
+        }
+        app.world_mut()
+            .get_mut::<Attack>(attacker)
+            .unwrap()
+            .remaining = 0.0;
+        combat.run(app.world_mut());
+        assert_eq!(
+            app.world()
+                .resource::<PendingDamage>()
+                .0
+                .get(&tower)
+                .unwrap()[0],
+            10.0
+        );
+        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 3);
+
+        // Without an eligible target, neither energy nor cooldown is spent.
+        app.world_mut().get_mut::<Position>(tower).unwrap().0 = center + Vec2::X * 4.0;
+        app.world_mut()
+            .get_mut::<Attack>(attacker)
+            .unwrap()
+            .remaining = 0.0;
+        combat.run(app.world_mut());
+        assert!(app.world().resource::<PendingDamage>().0.is_empty());
+        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 3);
+        assert_eq!(app.world().get::<Attack>(attacker).unwrap().remaining, 0.0);
+    }
+
+    #[test]
+    fn combat_requires_energy_even_with_an_eligible_target() {
+        let mut app = app();
+        let factions = app.world().resource::<FactionEntities>().0.clone();
+        let center = Vec2::splat(1000.0);
+        let attacker = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center),
+                Allegiance(factions[0]),
+                Vision { radius: 3.0 },
+                EnergyStore {
+                    current: 0,
+                    capacity: 5,
+                },
+                Attack {
+                    damage: 10.0,
+                    range: 1.6,
+                    cooldown: 0.8,
+                    remaining: 0.0,
+                },
+            ))
+            .id();
+        let target = app
+            .world_mut()
+            .spawn((Minion, Position(center + Vec2::X), Allegiance(factions[1])))
+            .id();
+        let mut combat = Schedule::default();
+        combat.add_systems((rebuild_index, collect_damage).chain());
+        combat.run(app.world_mut());
+        assert!(
+            !app.world()
+                .resource::<PendingDamage>()
+                .0
+                .contains_key(&target)
+        );
+        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 0);
+        assert_eq!(app.world().get::<Attack>(attacker).unwrap().remaining, 0.0);
     }
 
     #[test]

@@ -1,5 +1,8 @@
 //! A bounded view into the live ECS world, never an entity registry.
-use crate::model::{Allegiance, EntityKind, FACTION_NAMES, Faction};
+use crate::model::{
+    Allegiance, EnergyPickup, EnergyStore, EntityKind, FACTION_NAMES, Faction, Link,
+    SupplyConnection,
+};
 use bevy::prelude::*;
 use std::fmt::Write;
 
@@ -39,10 +42,12 @@ enum InspectorAction {
     Components,
     Close,
 }
-const KINDS: [EntityKind; 7] = [
+const KINDS: [EntityKind; 9] = [
     EntityKind::Faction,
     EntityKind::Tower,
     EntityKind::Minion,
+    EntityKind::EnergyPickup,
+    EntityKind::Link,
     EntityKind::Battlefield,
     EntityKind::Camera,
     EntityKind::Light,
@@ -222,6 +227,34 @@ fn short_type_name(name: &str) -> String {
     result.trim_end().to_owned()
 }
 
+fn append_energy_details(text: &mut String, entity: &EntityRef) {
+    if let Some(store) = entity.get::<EnergyStore>() {
+        let _ = writeln!(text, "Energy: {}/{}", store.current, store.capacity);
+    }
+    if let Some(pickup) = entity.get::<EnergyPickup>() {
+        let _ = writeln!(
+            text,
+            "Pickup: {} | recharge {:.1}s",
+            if pickup.available {
+                "charged"
+            } else {
+                "depleted"
+            },
+            pickup.recharge_remaining
+        );
+    }
+    if let Some(connection) = entity.get::<SupplyConnection>() {
+        let _ = writeln!(
+            text,
+            "Supply parent: {:?} | root: {:?}",
+            connection.parent, connection.root
+        );
+    }
+    if let Some(link) = entity.get::<Link>() {
+        let _ = writeln!(text, "Link: {:?} -> {:?}", link.source, link.target);
+    }
+}
+
 fn refresh(world: &mut World) {
     let open = world.resource::<InspectorState>().open;
     let mut roots = world.query_filtered::<&mut Node, With<InspectorRoot>>();
@@ -276,6 +309,7 @@ fn refresh(world: &mut World) {
             entity.get::<EntityKind>(),
             faction.map_or("None", |f| FACTION_NAMES[f.index])
         );
+        append_energy_details(&mut text, &entity);
         let mut components: Vec<_> = entity
             .archetype()
             .components()
@@ -311,6 +345,49 @@ fn refresh(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn energy_filters_and_details_read_live_component_values() {
+        let mut world = World::new();
+        let root = world.spawn_empty().id();
+        let pickup = world
+            .spawn((
+                EntityKind::EnergyPickup,
+                EnergyPickup {
+                    available: false,
+                    recharge_remaining: 2.5,
+                },
+            ))
+            .id();
+        let minion = world
+            .spawn((
+                EnergyStore {
+                    current: 2,
+                    capacity: 5,
+                },
+                SupplyConnection { parent: root, root },
+            ))
+            .id();
+        let link = world
+            .spawn((
+                EntityKind::Link,
+                Link {
+                    source: root,
+                    target: minion,
+                },
+            ))
+            .id();
+        assert_eq!(matching_entities(&mut world, 4, 0, false).1, vec![pickup]);
+        assert_eq!(matching_entities(&mut world, 5, 0, false).1, vec![link]);
+        let mut details = String::new();
+        for id in [pickup, minion, link] {
+            append_energy_details(&mut details, &world.entity(id));
+        }
+        assert!(details.contains("Energy: 2/5"));
+        assert!(details.contains("depleted | recharge 2.5s"));
+        assert!(details.contains(&format!("Supply parent: {root:?} | root: {root:?}")));
+        assert!(details.contains(&format!("Link: {root:?} -> {minion:?}")));
+    }
+
     #[test]
     fn filters_follow_live_world_and_never_retain_despawned_entities() {
         let mut world = World::new();

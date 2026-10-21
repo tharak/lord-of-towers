@@ -40,6 +40,8 @@ pub enum EntityKind {
     Faction,
     Tower,
     Minion,
+    EnergyPickup,
+    Link,
     Battlefield,
     Camera,
     Light,
@@ -86,6 +88,16 @@ pub struct SimulationConfig {
     pub minion_health: f32,
     pub tower_health: f32,
     pub seed: u64,
+    pub energy_pickup_count: usize,
+    pub initial_energy: u8,
+    pub energy_capacity: u8,
+    pub attack_energy_cost: u8,
+    pub pickup_radius: f32,
+    pub pickup_recharge_seconds: f32,
+    pub energy_seek_radius: f32,
+    pub link_range: f32,
+    pub energy_tick_seconds: f32,
+    pub energy_transfer_ticks: u32,
 }
 impl Default for SimulationConfig {
     fn default() -> Self {
@@ -97,6 +109,16 @@ impl Default for SimulationConfig {
             minion_health: 30.0,
             tower_health: 180.0,
             seed: 42,
+            energy_pickup_count: 30,
+            initial_energy: 5,
+            energy_capacity: 5,
+            attack_energy_cost: 1,
+            pickup_radius: 1.0,
+            pickup_recharge_seconds: 5.0,
+            energy_seek_radius: 15.0,
+            link_range: 15.0,
+            energy_tick_seconds: 1.0,
+            energy_transfer_ticks: 5,
         }
     }
 }
@@ -132,6 +154,7 @@ pub enum SimSet {
     Movement,
     Combat,
     Capture,
+    Energy,
     Influence,
     Victory,
 }
@@ -140,4 +163,46 @@ pub fn simulation_running(state: Res<MatchState>) -> bool {
 }
 pub fn simulation_delta(time: &Time<Fixed>, state: &MatchState) -> f32 {
     time.delta_secs() * state.speed
+}
+
+/// Stable across match restart; also resolves deterministic graph and collection ties.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SimulationId(pub u64);
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct EnergyStore {
+    pub current: u8,
+    pub capacity: u8,
+}
+
+/// A stationary neutral pickup with a single unit of rechargeable energy.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct EnergyPickup {
+    pub available: bool,
+    pub recharge_remaining: f32,
+}
+
+/// Each directed edge is an independent ECS entity, from supplier to recipient.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Link {
+    pub source: Entity,
+    pub target: Entity,
+}
+
+/// Present only on minions currently connected to a friendly tower.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SupplyConnection {
+    pub root: Entity,
+    pub parent: Entity,
+}
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct ForwardingCursor {
+    pub last_recipient: Option<u64>,
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct EnergyClock {
+    pub elapsed: f32,
+    pub pulses: u64,
 }

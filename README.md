@@ -26,9 +26,19 @@ Territory reflects current radial influence, with soft borders and neutral groun
 | Barad-dûr | Vermilion `#D55E00` |
 | Tower of Cirith Ungol | Purple `#CC79A7` |
 
+## Energy and supply
+
+Thirty neutral torus-shaped pickups are scattered using the match seed. Each holds one energy, stays in place when collected, and recharges after five simulation seconds. Bright pickups are ready; dim ones are recharging.
+
+Minions start with five energy and can store at most five. Each successful attack costs one. Empty minions seek nearby charged pickups or return toward a friendly supply network; movement and territory influence remain active.
+
+Straight faction-colored lines are actual Link entities. They connect friendly minions into tower-rooted branches, with at most 15 world units per link. Every five simulation seconds, each tower or connected minion sends one energy total to an eligible child, rotating fairly. Towers supply unlimited energy; minions spend their stored energy, including their last point. Transfers happen simultaneously, so incoming energy cannot travel multiple links in one pulse. Full recipients are skipped.
+
+Inspect minions for energy reserves, pickups for recharge state, and links for endpoint IDs. Pause and speed controls affect energy timers; restart resets all energy state and recreates the same pickup positions. See the [energy milestone](https://github.com/tharak/lord-of-towers/milestone/2) and [energy ECS contracts](docs/energy-contracts.md).
+
 ## Architecture and collaboration
 
-See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/1). Simulation, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
+See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/1). Simulation, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
 
 ## Development
 

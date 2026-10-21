@@ -404,7 +404,20 @@ mod tests {
 
     #[test]
     fn update_cancels_nearest_trail_at_any_distance_while_paused() {
-        let (world, _, _, minion) = setup();
+        let (mut world, faction, tower, minion) = setup();
+        let other_minion = world
+            .spawn((
+                Minion,
+                OriginTower(tower),
+                Position(Vec2::X * 20.0),
+                Allegiance(faction),
+                Movement {
+                    speed: 1.0,
+                    target: Vec2::ZERO,
+                    retarget_in: 0.0,
+                },
+            ))
+            .id();
         let mut app = App::new();
         *app.world_mut() = world;
         app.add_systems(Update, cancel_orders);
@@ -413,15 +426,22 @@ mod tests {
             .0
             .push(Vec2::X * 10.0);
         apply_orders(app.world_mut());
-        let trail = app.world().get::<AttackOrder>(minion).unwrap().trail;
+        app.world_mut()
+            .resource_mut::<AttackOrderRequests>()
+            .0
+            .push(Vec2::X * 20.0);
+        apply_orders(app.world_mut());
+        let first_trail = app.world().get::<AttackOrder>(minion).unwrap().trail;
+        let nearest_trail = app.world().get::<AttackOrder>(other_minion).unwrap().trail;
         app.world_mut().resource_mut::<MatchState>().paused = true;
         app.world_mut()
             .resource_mut::<CancelAttackOrderRequests>()
             .0
-            .push(Vec2::splat(10000.0));
+            .push(Vec2::X * 10000.0);
         app.world_mut().run_schedule(Update);
-        assert!(app.world().get::<AttackOrder>(minion).is_none());
-        assert!(app.world().get_entity(trail).is_err());
+        assert_eq!(app.world().get::<AttackOrder>(minion).unwrap().trail, first_trail);
+        assert!(app.world().get::<AttackOrder>(other_minion).is_none());
+        assert!(app.world().get_entity(nearest_trail).is_err());
     }
 
     #[test]

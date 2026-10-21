@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn update_cancels_nearest_trail_at_any_distance_while_paused() {
+    fn cancels_nearest_trail_at_any_distance_while_paused() {
         let (mut world, faction, tower, minion) = setup();
         let other_minion = world
             .spawn((
@@ -418,33 +418,27 @@ mod tests {
                 },
             ))
             .id();
-        let mut app = App::new();
-        *app.world_mut() = world;
-        app.add_systems(Update, cancel_orders);
-        app.world_mut()
+        world
             .resource_mut::<AttackOrderRequests>()
             .0
             .push(Vec2::X * 10.0);
-        apply_orders(app.world_mut());
-        app.world_mut()
+        apply_orders(&mut world);
+        world
             .resource_mut::<AttackOrderRequests>()
             .0
             .push(Vec2::X * 20.0);
-        apply_orders(app.world_mut());
-        let first_trail = app.world().get::<AttackOrder>(minion).unwrap().trail;
-        let nearest_trail = app.world().get::<AttackOrder>(other_minion).unwrap().trail;
-        app.world_mut().resource_mut::<MatchState>().paused = true;
-        app.world_mut()
+        apply_orders(&mut world);
+        let first_trail = world.get::<AttackOrder>(minion).unwrap().trail;
+        let nearest_trail = world.get::<AttackOrder>(other_minion).unwrap().trail;
+        world.resource_mut::<MatchState>().paused = true;
+        world
             .resource_mut::<CancelAttackOrderRequests>()
             .0
             .push(Vec2::X * 10000.0);
-        app.world_mut().run_schedule(Update);
-        assert_eq!(
-            app.world().get::<AttackOrder>(minion).unwrap().trail,
-            first_trail
-        );
-        assert!(app.world().get::<AttackOrder>(other_minion).is_none());
-        assert!(app.world().get_entity(nearest_trail).is_err());
+        cancel_orders(&mut world);
+        assert_eq!(world.get::<AttackOrder>(minion).unwrap().trail, first_trail);
+        assert!(world.get::<AttackOrder>(other_minion).is_none());
+        assert!(world.get_entity(nearest_trail).is_err());
     }
 
     #[test]

@@ -323,6 +323,7 @@ fn attach_energy_visuals(
                 Mesh3d(assets.link.clone()),
                 MeshMaterial3d(assets.materials[faction.index].clone()),
                 Transform::default(),
+                Visibility::Inherited,
             ));
         }
     }

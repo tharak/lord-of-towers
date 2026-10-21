@@ -421,7 +421,7 @@ mod tests {
         world
             .resource_mut::<AttackOrderRequests>()
             .0
-            .push(Vec2::X * 10.0);
+            .push(Vec2::X * 2.0);
         apply_orders(&mut world);
         world
             .resource_mut::<AttackOrderRequests>()

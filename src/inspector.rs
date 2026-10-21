@@ -48,7 +48,7 @@ const KINDS: [EntityKind; 11] = [
     EntityKind::Minion,
     EntityKind::RawElementDeposit,
     EntityKind::Trail,
-    EntityKind::CargoVisual,
+    EntityKind::DonutVisual,
     EntityKind::Link,
     EntityKind::Battlefield,
     EntityKind::Camera,

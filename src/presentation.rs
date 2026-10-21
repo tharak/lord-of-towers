@@ -15,6 +15,7 @@ impl Plugin for PresentationPlugin {
                     button_controls,
                     browser_state,
                     attach_visuals,
+                    sync_donut_visuals,
                     sync_visuals,
                     attach_resource_visuals,
                     sync_gathering_visuals,
@@ -34,14 +35,14 @@ struct VisualAssets {
     ground: Handle<Mesh>,
     deposit: Handle<Mesh>,
     trail: Handle<Mesh>,
-    cargo: Handle<Mesh>,
+    donut: Handle<Mesh>,
     link: Handle<Mesh>,
     raw: Handle<StandardMaterial>,
     trail_materials: Vec<Vec<Handle<StandardMaterial>>>,
     materials: Vec<Handle<StandardMaterial>>,
 }
 #[derive(Component)]
-struct CargoVisual;
+struct DonutVisual;
 const TRAIL_BUCKETS: usize = 8;
 
 #[derive(Component)]
@@ -112,7 +113,7 @@ fn setup(
         ground,
         deposit: meshes.add(Torus::default()),
         trail: meshes.add(Cylinder::new(0.32, 0.08)),
-        cargo: meshes.add(Cuboid::new(0.55, 0.55, 0.55)),
+        donut: meshes.add(Torus::default()),
         link: meshes.add(Cuboid::default()),
         raw: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 1.0, 0.8),
@@ -291,19 +292,61 @@ fn attach_visuals(
                 MeshMaterial3d(assets.materials[faction.index].clone()),
                 Transform::default(),
             ));
-            if tower.is_none() {
-                commands.entity(entity).with_children(|parent| {
-                    parent.spawn((
-                        Name::new("Carried rawElement"),
-                        EntityKind::CargoVisual,
-                        CargoVisual,
-                        Mesh3d(assets.cargo.clone()),
-                        MeshMaterial3d(assets.raw.clone()),
-                        Transform::from_xyz(0.0, 1.0, 0.0),
-                        Visibility::Hidden,
-                    ));
-                });
-            }
+        }
+    }
+}
+// Eight pieces per tier keep each unit count visible without scaling by inventory.
+fn donut_transform(index: usize, tower: bool) -> Transform {
+    let angle = (index % 8) as f32 * std::f32::consts::TAU / 8.0;
+    let radius = if tower { 1.3 } else { 0.65 };
+    let base = if tower { 3.72 } else { 1.0 };
+    Transform::from_xyz(
+        angle.cos() * radius,
+        base + (index / 8) as f32 * 0.24,
+        angle.sin() * radius,
+    )
+    .with_scale(Vec3::splat(0.18))
+}
+
+// Exclusive reconciliation makes additions/removals visible in this same frame.
+fn sync_donut_visuals(world: &mut World) {
+    let assets = world.resource::<VisualAssets>();
+    let mesh = assets.donut.clone();
+    let material = assets.raw.clone();
+    let inventories: Vec<_> = world
+        .query_filtered::<(Entity, &RawElement, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>()
+        .iter(world)
+        .map(|(entity, raw, tower)| (entity, raw.0 as usize, tower.is_some()))
+        .collect();
+    for (parent, count, tower) in inventories {
+        let mut children: Vec<Entity> = world
+            .get::<Children>(parent)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| world.get::<DonutVisual>(*child).is_some())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let retained = count.min(children.len());
+        for child in children.drain(retained..) {
+            world.despawn(child);
+        }
+        for (index, child) in children.iter().enumerate() {
+            world
+                .entity_mut(*child)
+                .insert(donut_transform(index, tower));
+        }
+        for index in children.len()..count {
+            world.spawn((
+                Name::new(format!("Crown donut {}", index + 1)),
+                EntityKind::DonutVisual,
+                DonutVisual,
+                ChildOf(parent),
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                donut_transform(index, tower),
+            ));
         }
     }
 }
@@ -389,10 +432,8 @@ fn sync_gathering_visuals(
             &mut Transform,
             &mut MeshMaterial3d<StandardMaterial>,
         ),
-        (Without<RawElementDeposit>, Without<CargoVisual>),
+        (Without<RawElementDeposit>, Without<DonutVisual>),
     >,
-    carriers: Query<&RawElement, With<Minion>>,
-    mut cargo: Query<(&ChildOf, &mut Visibility), With<CargoVisual>>,
 ) {
     for (position, mut transform) in &mut deposits {
         transform.translation = Vec3::new(position.0.x, 0.35, position.0.y);
@@ -405,13 +446,6 @@ fn sync_gathering_visuals(
                 [trail_bucket(trail.remaining, config.trail_lifetime)]
             .clone();
         }
-    }
-    for (parent, mut visibility) in &mut cargo {
-        *visibility = if carriers.get(parent.parent()).is_ok_and(|raw| raw.0 > 0) {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
     }
 }
 // Stretch a unit cuboid along local X. Gameplay endpoints remain independent of mesh size.
@@ -704,6 +738,27 @@ fn browser_visibility(mut state: ResMut<MatchState>) {
 mod tests {
     use super::*;
 
+    fn donuts(world: &mut World, parent: Entity) -> Vec<Entity> {
+        world
+            .query_filtered::<(Entity, &ChildOf), With<DonutVisual>>()
+            .iter(world)
+            .filter_map(|(entity, child_of)| (child_of.parent() == parent).then_some(entity))
+            .collect()
+    }
+
+    #[test]
+    fn crown_tiers_are_above_unit_tops_and_repeat_every_eight() {
+        for tower in [false, true] {
+            let first = donut_transform(0, tower);
+            let ninth = donut_transform(8, tower);
+            assert!((ninth.translation.y - first.translation.y - 0.24).abs() < 0.0001);
+            assert_eq!(first.translation.x, ninth.translation.x);
+            assert_eq!(first.translation.z, ninth.translation.z);
+            assert!(first.translation.y > if tower { 3.5 } else { 0.77 });
+            assert_ne!(first.translation, donut_transform(1, tower).translation);
+        }
+    }
+
     #[test]
     fn link_mesh_spans_endpoints_and_rejects_degenerate_segments() {
         let source = Vec2::new(-3.0, 7.0);
@@ -725,7 +780,7 @@ mod tests {
         assert_eq!(trail_bucket(100.0, 30.0), TRAIL_BUCKETS - 1);
     }
     #[test]
-    fn gathering_visuals_share_assets_follow_cargo_and_despawn_with_parent() {
+    fn gathering_visuals_share_assets_and_donuts_follow_inventory_and_parent() {
         let mut app = App::new();
         let mut meshes = Assets::<Mesh>::default();
         let mut materials = Assets::<StandardMaterial>::default();
@@ -746,7 +801,7 @@ mod tests {
             ground: meshes.add(Plane3d::default()),
             deposit: meshes.add(Torus::default()),
             trail: meshes.add(Cylinder::default()),
-            cargo: meshes.add(Cuboid::default()),
+            donut: meshes.add(Torus::default()),
             link: meshes.add(Cuboid::default()),
             raw: raw.clone(),
             trail_materials: fades.clone(),
@@ -757,6 +812,7 @@ mod tests {
             Update,
             (
                 attach_visuals,
+                sync_donut_visuals,
                 sync_visuals,
                 attach_resource_visuals,
                 sync_gathering_visuals,
@@ -772,7 +828,13 @@ mod tests {
             .id();
         let tower = app
             .world_mut()
-            .spawn((Tower { slot: 0 }, Position(Vec2::X * 2.0), Allegiance(own)))
+            .spawn((
+                Tower { slot: 0 },
+                Position(Vec2::X * 2.0),
+                Allegiance(own),
+                RawElement(9),
+                MatchEntity,
+            ))
             .id();
         let deposit = app
             .world_mut()
@@ -801,15 +863,26 @@ mod tests {
             ))
             .id();
         app.world_mut().run_schedule(Update);
-        let cargo = app
-            .world_mut()
-            .query_filtered::<Entity, With<CargoVisual>>()
-            .single(app.world())
-            .unwrap();
-        assert_eq!(
-            *app.world().get::<Visibility>(cargo).unwrap(),
-            Visibility::Hidden
-        );
+        assert_eq!(donuts(app.world_mut(), minion).len(), 0);
+        let crown = donuts(app.world_mut(), tower);
+        assert_eq!(crown.len(), 9);
+        let mesh = app.world().resource::<VisualAssets>().donut.clone();
+        for child in &crown {
+            assert_eq!(app.world().get::<Mesh3d>(*child).unwrap().0, mesh);
+            assert_eq!(
+                app.world()
+                    .get::<MeshMaterial3d<StandardMaterial>>(*child)
+                    .unwrap()
+                    .0,
+                raw
+            );
+            assert_eq!(
+                *app.world().get::<EntityKind>(*child).unwrap(),
+                EntityKind::DonutVisual
+            );
+            assert!(app.world().get::<RawElement>(*child).is_none());
+            assert!(app.world().get::<MatchEntity>(*child).is_none());
+        }
         assert_eq!(
             app.world()
                 .get::<MeshMaterial3d<StandardMaterial>>(deposit)
@@ -827,9 +900,17 @@ mod tests {
         app.world_mut().get_mut::<RawElement>(minion).unwrap().0 = 1;
         app.world_mut().entity_mut(tower).insert(Allegiance(enemy));
         app.world_mut().run_schedule(Update);
-        assert_eq!(
-            *app.world().get::<Visibility>(cargo).unwrap(),
-            Visibility::Inherited
+        let carried = donuts(app.world_mut(), minion);
+        assert_eq!(carried.len(), 1);
+        assert_eq!(donuts(app.world_mut(), tower), crown);
+        app.world_mut().get_mut::<RawElement>(tower).unwrap().0 = 1;
+        app.world_mut().run_schedule(Update);
+        assert_eq!(donuts(app.world_mut(), tower).len(), 1);
+        assert!(
+            crown
+                .iter()
+                .skip(1)
+                .all(|child| app.world().get_entity(*child).is_err())
         );
         assert_eq!(
             app.world()
@@ -845,9 +926,28 @@ mod tests {
                 .0,
             palette[0]
         );
+        app.world_mut().get_mut::<RawElement>(minion).unwrap().0 = 0;
+        app.world_mut().run_schedule(Update);
+        assert!(donuts(app.world_mut(), minion).is_empty());
+        assert!(app.world().get_entity(carried[0]).is_err());
+        app.world_mut().get_mut::<RawElement>(minion).unwrap().0 = 17;
+        app.world_mut().run_schedule(Update);
+        let carried = donuts(app.world_mut(), minion);
+        assert_eq!(carried.len(), 17);
         app.world_mut().despawn(minion);
         app.world_mut().run_schedule(Update);
-        assert!(app.world().get_entity(cargo).is_err());
+        assert!(
+            carried
+                .iter()
+                .all(|child| app.world().get_entity(*child).is_err())
+        );
+        let remaining = donuts(app.world_mut(), tower);
+        app.world_mut().despawn(tower);
+        assert!(
+            remaining
+                .iter()
+                .all(|child| app.world().get_entity(*child).is_err())
+        );
         assert_eq!(
             *app.world().get::<Visibility>(link).unwrap(),
             Visibility::Hidden

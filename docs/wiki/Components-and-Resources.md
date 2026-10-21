@@ -7,11 +7,13 @@
 | `Name`, `EntityKind`, `MatchEntity` | Application label, inspectable category, and match restart lifetime. |
 | `SimulationId` | Stable match-local ordering for deterministic ties; distinct from Bevy entity ID. |
 | `Faction`, `Allegiance` | Faction record and owner reference. |
-| `Tower`, `Minion`, `RawElementDeposit` | Gameplay role markers. |
+| `Tower`, `Minion`, `RawElementDeposit` | Gameplay role markers. Towers are destroyed at zero health. |
 | `OriginTower` | Tower that spawned a minion; population cap counts living minions by this reference. |
 | `Position`, `Health`, `Movement` | World position, health, and steering target/speed. |
 | `Spawner` | Population cap for minions from a tower; rawElement payment is handled by the spawn system. |
 | `Attack` | Damage, reach, cooldown, and time until the next shot. Eligible enemy minions take priority over towers. Firing spends one energy; damage occurs on projectile impact. |
+| `AttackTrail`, `AttackOrder` | Player-placed destination with tower/assigned minion/optional enemy target, and the minion's reference to its live order. |
+| `ShootingPause` | Remaining simulation time that a minion stays still after firing. |
 | `EnergyProjectile` | Target, damage, flight speed, and remaining simulation lifetime of a fired energy sphere. |
 | `Vision` | Local circular radius; default 15. |
 | `RawElement` | Quantity on a deposit, cargo on a minion (0–1), or stock in a tower. No crown child has this component. |
@@ -27,6 +29,8 @@
 | Component | Meaning |
 |---|---|
 | `DonutVisual` | Presentation-only crown child. One per actual rawElement unit; rendered with shared Bevy `Torus` mesh. |
+| `Stack`, `StackVisual` | Reusable visual count/layout and its child primitive; used for tower health cubes and deposit donuts. |
+| `TowerBeacon` | Sphere child atop a tower stack; the attack laser starts here. |
 | `EnergyOrbVisual` | Presentation-only small sphere child. One per actual stored minion energy point. |
 | `SpectatorCamera` | Camera control target. |
 | `StatusText`, `FactionText`, `Control` | Debug HUD labels and clickable controls. |
@@ -40,6 +44,7 @@
 | Resource | Meaning |
 |---|---|
 | `SimulationConfig` | Default world size, seed, vision, gathering, combat, spawning, trail and energy tuning. |
+| `AttackOrderRequests` | Pending screen-to-world map clicks/touches consumed by the next simulation step. |
 | `MatchState` | Pause, speed, hidden-tab, elapsed time, winner and restart request. |
 | `FactionEntities` | Five live faction entity IDs for deterministic ownership lookup. |
 | `RawElementEconomy` | Initial resource total and cumulative spending; verifies that live deposits, cargo and stock plus spending equal the initial total. |

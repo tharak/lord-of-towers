@@ -6,11 +6,11 @@ Simulation uses Position(Vec2) on X/Z; Y is visual height. Faction index is reso
 
 InfluenceField must expose `sample(position: Vec2) -> [f32; 5]`, `territory_percentages() -> [f32; 5]`, public `revision: u64`, and `half_extent: f32`. Influence sampling runs in SimSet::Influence, at 10 Hz simulation time. Presence uses a finite radial falloff, with strongest influence controlling territory and ties contested. Presentation reads InfluenceField to color ground; gathering navigation uses only local vision and known friendly delivery towers.
 
-SimulationPlugin configures ordered SimSet chain Spawn → Index → Target → Movement → Combat → Capture → Gathering → PaidSpawn → Energy → Influence → Victory, gated by simulation_running. Fixed time runs at 30 Hz. simulation_delta applies speed. Restart is serviced in PreUpdate even while paused, with deferred despawns flushed before fixed simulation and presentation Update. This prevents visual commands from targeting entities removed by a restart. MatchState is the control interface.
+SimulationPlugin configures ordered SimSet chain Spawn → Index → Target → Orders → Movement → Combat → Capture → Gathering → PaidSpawn → Energy → Influence → Victory, gated by simulation_running. Fixed time runs at 30 Hz. simulation_delta applies speed. Restart is serviced in PreUpdate even while paused, with deferred despawns flushed before fixed simulation and presentation Update. This prevents visual commands from targeting entities removed by a restart. MatchState is the control interface.
 
 Use a 100×100 world, five towers on a radius-32 circle. Initial balance defaults live in SimulationConfig. Independent seeded random choices break symmetry without nondeterministic test expectations.
 
-Presentation builds a shared primitive mesh/material palette and adds visuals to new Tower/Minion entities. Capture recolors from Allegiance. Camera and UI survive match restart. No gameplay logic depends on rendered dimensions. Controls: Space pause, 1/2/3 speed 1×/2×/4×, R restart, F3 inspector; clickable controls are also required. Browser visibility sets browser_hidden, not paused, to preserve user intent.
+Presentation builds a shared primitive mesh/material palette and attaches stacks, beacons, lasers, and minion visuals to live entities. Camera and UI survive match restart. No gameplay logic depends on rendered dimensions. Controls: click/touch map to issue an attack order, Space pause, 1/2/3 speed 1×/2×/4×, R restart, F3 inspector; clickable controls are also required. Browser visibility sets browser_hidden, not paused, to preserve user intent.
 
 Inspector exposes a public `InspectorState { pub open: bool }` resource for presentation's button. Avoid browser-blocked F3 as the only entrypoint.
 

@@ -1,5 +1,7 @@
 # Energy network contracts (historical pickup design superseded)
 
+Historical implementation contract: tower capture references below are superseded by tower destruction in the current simulation. See the [entity catalog](entity-catalog.md).
+
 The rawElement implementation supersedes all pickup/recharge, energy-seeking AI, timed spawning and pickup browser hooks below. Current gathering interfaces are in [gathering contracts](gathering-contracts.md). Network topology, energy costs, pulse snapshots and fairness remain unchanged.
 
 # Energy and supply contracts

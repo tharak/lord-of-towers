@@ -9,6 +9,7 @@ impl Plugin for OrdersPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AttackOrderRequests>()
             .init_resource::<CancelAttackOrderRequests>()
+            .init_resource::<AttackPathIds>()
             .add_systems(Update, (gather_pointer_orders, cancel_orders).chain())
             .add_systems(
                 FixedUpdate,
@@ -78,24 +79,37 @@ fn gather_pointer_orders(
             if cancel {
                 cancellations.0.push(point);
             } else {
-                requests.0.push(point);
+                requests.0.push(vec![point]);
             }
         }
     }
 }
 
-fn remove_trail(world: &mut World, entity: Entity, assigned: Entity) {
-    if world
-        .get::<AttackOrder>(assigned)
-        .is_some_and(|order| order.trail == entity)
-    {
-        world.entity_mut(assigned).remove::<AttackOrder>();
+fn remove_trail(world: &mut World, entity: Entity) {
+    let followers: Vec<_> = world
+        .query::<(Entity, &AttackOrder)>()
+        .iter(world)
+        .filter(|(_, order)| order.trail == entity)
+        .map(|(entity, _)| entity)
+        .collect();
+    for follower in followers {
+        world.entity_mut(follower).remove::<AttackOrder>();
     }
     let _ = world.despawn(entity);
 }
 
 // Update keeps cancellation and tower-loss cleanup responsive while simulation is paused.
 fn cancel_orders(world: &mut World) {
+    // Release cargo carriers before gathering navigation runs, including while paused.
+    let carriers: Vec<_> = world
+        .query::<(Entity, &AttackOrder, &RawElement)>()
+        .iter(world)
+        .filter(|(_, _, cargo)| cargo.0 > 0)
+        .map(|(entity, _, _)| entity)
+        .collect();
+    for entity in carriers {
+        world.entity_mut(entity).remove::<AttackOrder>();
+    }
     let points = std::mem::take(&mut world.resource_mut::<CancelAttackOrderRequests>().0);
     let player = world
         .query_filtered::<Entity, (With<Tower>, With<PlayerControlled>)>()
@@ -104,11 +118,13 @@ fn cancel_orders(world: &mut World) {
     let invalid: Vec<_> = world
         .query::<(Entity, &AttackTrail)>()
         .iter(world)
-        .filter(|(_, trail)| Some(trail.tower) != player)
-        .map(|(entity, trail)| (entity, trail.assigned))
+        .filter(|(_, trail)| {
+            world.resource::<MatchState>().restart_requested || Some(trail.tower) != player
+        })
+        .map(|(entity, _)| entity)
         .collect();
-    for (entity, assigned) in invalid {
-        remove_trail(world, entity, assigned);
+    for entity in invalid {
+        remove_trail(world, entity);
     }
     if world.resource::<MatchState>().restart_requested {
         return;
@@ -118,33 +134,68 @@ fn cancel_orders(world: &mut World) {
         return;
     };
     for point in points.into_iter().filter(|point| point.is_finite()) {
-        let nearest = world
+        let markers: Vec<_> = world
             .query::<(Entity, &AttackTrail, &Position)>()
             .iter(world)
-            .filter(|(_, trail, position)| {
-                trail.tower == player
-                    && position.0.distance_squared(point)
-                        <= ATTACK_TRAIL_CANCEL_RADIUS * ATTACK_TRAIL_CANCEL_RADIUS
+            .filter(|(_, trail, _)| trail.tower == player)
+            .map(|(entity, trail, position)| (entity, *trail, position.0))
+            .collect();
+        let nearest = markers
+            .iter()
+            .map(|(entity, trail, position)| {
+                let previous = markers.iter().find(|(_, other, _)| {
+                    other.path_id == trail.path_id
+                        && other.sequence.checked_add(1) == Some(trail.sequence)
+                });
+                let distance = previous.map_or_else(
+                    || position.distance_squared(point),
+                    |(_, _, start)| {
+                        let offset = *position - *start;
+                        let t = if offset.length_squared() > 0.0 {
+                            ((point - *start).dot(offset) / offset.length_squared()).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        (*start + offset * t).distance_squared(point)
+                    },
+                );
+                (*entity, trail.path_id, distance)
             })
-            .min_by(|a, b| distance_key(a.2.0, point, a.0, b.2.0, b.0))
-            .map(|(entity, trail, _)| (entity, trail.assigned));
-        if let Some((entity, assigned)) = nearest {
-            remove_trail(world, entity, assigned);
+            .filter(|(_, _, distance)| *distance <= ATTACK_TRAIL_CANCEL_RADIUS.powi(2))
+            .min_by(|a, b| a.2.total_cmp(&b.2).then(a.0.to_bits().cmp(&b.0.to_bits())));
+        if let Some((_, path, _)) = nearest {
+            for (entity, trail, _) in markers {
+                if trail.path_id == path {
+                    remove_trail(world, entity);
+                }
+            }
         }
     }
 }
 
 fn apply_orders(world: &mut World) {
+    cancel_orders(world);
     if world.resource::<MatchState>().restart_requested {
         world.resource_mut::<AttackOrderRequests>().0.clear();
         return;
     }
-    cancel_orders(world);
     if !simulation_active(world.resource::<MatchState>()) {
         return;
     }
+    // Signals placed this step become discoverable on the next simulation step.
+    let discoverable: Vec<_> = world
+        .query_filtered::<Entity, With<AttackTrail>>()
+        .iter(world)
+        .collect();
     let requests = std::mem::take(&mut world.resource_mut::<AttackOrderRequests>().0);
-    for point in requests.into_iter().filter(|point| point.is_finite()) {
+    for points in requests {
+        let points: Vec<_> = points
+            .into_iter()
+            .filter(|point| point.is_finite())
+            .collect();
+        if points.is_empty() {
+            continue;
+        }
         let tower = world
             .query_filtered::<(Entity, &Position, &Allegiance), (With<Tower>, With<PlayerControlled>)>()
             .iter(world)
@@ -153,71 +204,44 @@ fn apply_orders(world: &mut World) {
         let Some((tower, faction)) = tower else {
             continue;
         };
-        let minion = world
-            .query_filtered::<(
-                Entity,
-                &Position,
-                &Allegiance,
-                Option<&AttackOrder>,
-                &OriginTower,
-            ), (With<Minion>, With<Movement>)>()
-            .iter(world)
-            .filter(|(_, _, allegiance, _, origin)| allegiance.0 == faction && origin.0 == tower)
-            .min_by(|a, b| {
-                a.3.is_some()
-                    .cmp(&b.3.is_some())
-                    .then_with(|| distance_key(a.1.0, point, a.0, b.1.0, b.0))
-            })
-            .map(|(entity, _, _, _, _)| entity);
-        let Some(minion) = minion else { continue };
-        let target = world.query_filtered::<(Entity, &Position, &Allegiance, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>()
+        world.resource_mut::<AttackPathIds>().0 += 1;
+        let path_id = world.resource::<AttackPathIds>().0;
+        let last = points.len() - 1;
+        for (sequence, point) in points.into_iter().enumerate() {
+            let target = world.query_filtered::<(Entity, &Position, &Allegiance, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>()
             .iter(world)
             .filter(|(_, position, allegiance, tower)| allegiance.0 != faction && position.0.distance(point) <= if tower.is_some() { 2.8 } else { 1.5 })
             .min_by(|a, b| distance_key(a.1.0, point, a.0, b.1.0, b.0))
             .map(|(entity, _, _, _)| entity);
-        if let Some(old) = world.get::<AttackOrder>(minion).copied() {
-            let _ = world.despawn(old.trail);
+            world
+                .spawn((
+                    Name::new("Player attack trail"),
+                    MatchEntity,
+                    EntityKind::AttackTrail,
+                    Position(point),
+                    Allegiance(faction),
+                    AttackTrail {
+                        tower,
+                        path_id,
+                        sequence: sequence as u32,
+                        target: if sequence == last { target } else { None },
+                    },
+                ))
+                .id();
         }
-        let trail = world
-            .spawn((
-                Name::new("Player attack trail"),
-                MatchEntity,
-                EntityKind::AttackTrail,
-                Position(point),
-                Allegiance(faction),
-                AttackTrail {
-                    tower,
-                    assigned: minion,
-                    target,
-                },
-            ))
-            .id();
-        world.entity_mut(minion).insert(AttackOrder { trail });
     }
     let trails: Vec<_> = world
         .query::<(Entity, &AttackTrail, &Position, &Allegiance)>()
         .iter(world)
         .map(|(entity, trail, position, allegiance)| (entity, *trail, position.0, allegiance.0))
         .collect();
-    for (entity, trail, mut destination, faction) in trails {
+    for (entity, trail, _, faction) in trails {
         let valid = world.get::<Tower>(trail.tower).is_some()
             && world
                 .get::<Allegiance>(trail.tower)
-                .is_some_and(|owner| owner.0 == faction)
-            && world
-                .get::<Allegiance>(trail.assigned)
-                .is_some_and(|owner| owner.0 == faction)
-            && world
-                .get::<AttackOrder>(trail.assigned)
-                .is_some_and(|order| order.trail == entity);
+                .is_some_and(|owner| owner.0 == faction);
         if !valid {
-            if world
-                .get::<AttackOrder>(trail.assigned)
-                .is_some_and(|order| order.trail == entity)
-            {
-                world.entity_mut(trail.assigned).remove::<AttackOrder>();
-            }
-            let _ = world.despawn(entity);
+            remove_trail(world, entity);
             continue;
         }
         if let Some(target) = trail.target {
@@ -226,43 +250,85 @@ fn apply_orders(world: &mut World) {
                 .is_some_and(|owner| owner.0 != faction)
                 && let Some(position) = world.get::<Position>(target)
             {
-                destination = position.0;
+                let destination = position.0;
                 world.get_mut::<Position>(entity).unwrap().0 = destination;
             } else {
                 world.get_mut::<AttackTrail>(entity).unwrap().target = None;
             }
         }
-        let movement_target = if let Some(target) = world
-            .get::<AttackTrail>(entity)
-            .and_then(|trail| trail.target)
+    }
+    let minions: Vec<_> = world.query_filtered::<(Entity, &Position, &Allegiance, &OriginTower, &Vision), (With<Minion>, With<Movement>)>()
+        .iter(world).map(|(entity, position, owner, origin, vision)| (entity, position.0, owner.0, origin.0, vision.radius)).collect();
+    for (minion, position, faction, origin, radius) in minions {
+        if world
+            .get::<RawElement>(minion)
+            .is_some_and(|cargo| cargo.0 > 0)
         {
-            let position = world
-                .get::<Position>(trail.assigned)
-                .map(|position| position.0);
-            let range = world
-                .get::<Attack>(trail.assigned)
-                .map(|attack| attack.range);
-            match (position, range) {
-                (Some(position), Some(range))
-                    if position.distance(destination)
-                        <= range
-                            + if world.get::<Tower>(target).is_some() {
-                                2.0
-                            } else {
-                                0.0
-                            } =>
-                {
-                    position
-                }
-                _ => destination,
+            world.entity_mut(minion).remove::<AttackOrder>();
+            continue;
+        }
+        let eligible =
+            |trail: &AttackTrail, owner: &Allegiance| trail.tower == origin && owner.0 == faction;
+        let current = world.get::<AttackOrder>(minion).and_then(|order| {
+            let trail = world.get::<AttackTrail>(order.trail)?;
+            let owner = world.get::<Allegiance>(order.trail)?;
+            eligible(trail, owner).then_some(order.trail)
+        });
+        let chosen = current.or_else(|| {
+            world
+                .query::<(Entity, &AttackTrail, &Position, &Allegiance)>()
+                .iter(world)
+                .filter(|(entity, trail, destination, owner)| {
+                    discoverable.contains(entity)
+                        && eligible(trail, owner)
+                        && position.distance_squared(destination.0) <= radius.max(0.0).powi(2)
+                })
+                .min_by(|a, b| distance_key(a.2.0, position, a.0, b.2.0, b.0))
+                .map(|(entity, _, _, _)| entity)
+        });
+        let Some(mut trail) = chosen else {
+            world.entity_mut(minion).remove::<AttackOrder>();
+            continue;
+        };
+        loop {
+            let marker = *world.get::<AttackTrail>(trail).unwrap();
+            if position.distance(world.get::<Position>(trail).unwrap().0) > 1.0 {
+                break;
             }
+            let next = world
+                .query::<(Entity, &AttackTrail)>()
+                .iter(world)
+                .filter(|(_, next)| {
+                    next.path_id == marker.path_id && next.sequence > marker.sequence
+                })
+                .min_by_key(|(entity, next)| (next.sequence, entity.to_bits()))
+                .map(|(entity, _)| entity);
+            let Some(next) = next else {
+                break;
+            };
+            trail = next;
+        }
+        let destination = world.get::<Position>(trail).unwrap().0;
+        let target = world.get::<AttackTrail>(trail).unwrap().target;
+        let movement_target = if target.is_some_and(|target| {
+            world.get::<Attack>(minion).is_some_and(|attack| {
+                position.distance(destination)
+                    <= attack.range
+                        + if world.get::<Tower>(target).is_some() {
+                            2.0
+                        } else {
+                            0.0
+                        }
+            })
+        }) {
+            position
         } else {
             destination
         };
-        if let Some(mut movement) = world.get_mut::<Movement>(trail.assigned) {
-            movement.target = movement_target;
-        }
+        world.entity_mut(minion).insert(AttackOrder { trail });
+        world.get_mut::<Movement>(minion).unwrap().target = movement_target;
     }
+
     // Match restart or external cleanup may remove a trail before its minion.
     let stale: Vec<_> = world
         .query::<(Entity, &AttackOrder)>()
@@ -298,6 +364,7 @@ mod tests {
         world.init_resource::<MatchState>();
         world.init_resource::<AttackOrderRequests>();
         world.init_resource::<CancelAttackOrderRequests>();
+        world.init_resource::<AttackPathIds>();
         let faction = world.spawn_empty().id();
         let tower = world
             .spawn((
@@ -307,164 +374,157 @@ mod tests {
                 Allegiance(faction),
             ))
             .id();
-        let minion = world
+        let minion = unit(&mut world, faction, tower, Vec2::ZERO);
+        (world, faction, tower, minion)
+    }
+    fn unit(world: &mut World, faction: Entity, tower: Entity, point: Vec2) -> Entity {
+        world
             .spawn((
                 Minion,
                 OriginTower(tower),
-                Position(Vec2::ZERO),
+                Position(point),
                 Allegiance(faction),
+                Vision { radius: 5.0 },
+                RawElement(0),
                 Movement {
                     speed: 1.0,
                     target: Vec2::ZERO,
                     retarget_in: 0.0,
                 },
             ))
-            .id();
-        (world, faction, tower, minion)
+            .id()
+    }
+    fn draw(world: &mut World, points: Vec<Vec2>) {
+        world.resource_mut::<AttackOrderRequests>().0.push(points);
+        apply_orders(world);
     }
     #[test]
-    fn ground_order_persists_and_reassignment_removes_old_trail() {
+    fn placement_selects_no_minion_and_multiple_units_discover_in_vision() {
+        let (mut world, faction, tower, minion) = setup();
+        let second = unit(&mut world, faction, tower, Vec2::X);
+        let far = unit(&mut world, faction, tower, Vec2::X * 30.0);
+        let foreign_tower = world.spawn_empty().id();
+        let foreign = unit(&mut world, faction, foreign_tower, Vec2::ZERO);
+        draw(&mut world, vec![Vec2::X * 4.0]);
+        assert!(world.get::<AttackOrder>(minion).is_none());
+        apply_orders(&mut world);
+        assert_eq!(
+            world.get::<AttackOrder>(minion).unwrap().trail,
+            world.get::<AttackOrder>(second).unwrap().trail
+        );
+        assert!(world.get::<AttackOrder>(far).is_none());
+        assert!(world.get::<AttackOrder>(foreign).is_none());
+        world.get_mut::<Position>(far).unwrap().0 = Vec2::X * 7.0;
+        apply_orders(&mut world);
+        assert!(world.get::<AttackOrder>(far).is_some());
+    }
+    #[test]
+    fn follows_ordered_waypoints_and_holds_final_destination() {
         let (mut world, _, _, minion) = setup();
-        world
-            .resource_mut::<AttackOrderRequests>()
-            .0
-            .push(Vec2::X * 8.0);
+        draw(
+            &mut world,
+            vec![Vec2::X * 2.0, Vec2::Y * 8.0, Vec2::X * 12.0],
+        );
         apply_orders(&mut world);
-        let old = world.get::<AttackOrder>(minion).unwrap().trail;
-        world.get_mut::<Movement>(minion).unwrap().target = Vec2::ZERO;
+        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::X * 2.0);
+        world.get_mut::<Position>(minion).unwrap().0 = Vec2::X * 2.0;
         apply_orders(&mut world);
-        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::X * 8.0);
-        world
-            .resource_mut::<AttackOrderRequests>()
-            .0
-            .push(Vec2::Y * 6.0);
+        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::Y * 8.0);
+        world.get_mut::<Position>(minion).unwrap().0 = Vec2::Y * 8.0;
         apply_orders(&mut world);
-        assert!(world.get_entity(old).is_err());
-        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::Y * 6.0);
+        assert_eq!(
+            world.get::<Movement>(minion).unwrap().target,
+            Vec2::X * 12.0
+        );
+        world.get_mut::<Position>(minion).unwrap().0 = Vec2::X * 12.0;
+        apply_orders(&mut world);
+        assert!(world.get::<AttackOrder>(minion).is_some());
+        assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 3);
     }
     #[test]
-    fn hostile_target_tracks_then_freezes_and_tower_loss_cleans_up() {
+    fn cargo_is_never_diverted_and_releases_existing_following() {
+        let (mut world, _, _, minion) = setup();
+        world.get_mut::<RawElement>(minion).unwrap().0 = 1;
+        world.get_mut::<Movement>(minion).unwrap().target = Vec2::Y;
+        draw(&mut world, vec![Vec2::X * 2.0]);
+        apply_orders(&mut world);
+        assert!(world.get::<AttackOrder>(minion).is_none());
+        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::Y);
+        world.get_mut::<RawElement>(minion).unwrap().0 = 0;
+        apply_orders(&mut world);
+        assert!(world.get::<AttackOrder>(minion).is_some());
+        world.get_mut::<RawElement>(minion).unwrap().0 = 1;
+        apply_orders(&mut world);
+        assert!(world.get::<AttackOrder>(minion).is_none());
+    }
+    #[test]
+    fn cancellation_near_segment_removes_whole_path_and_all_followers_while_paused() {
+        let (mut world, faction, tower, minion) = setup();
+        let second = unit(&mut world, faction, tower, Vec2::ZERO);
+        draw(&mut world, vec![Vec2::X * 2.0, Vec2::X * 12.0]);
+        apply_orders(&mut world);
+        draw(&mut world, vec![Vec2::Y * 20.0]);
+        world.resource_mut::<MatchState>().paused = true;
+        world
+            .resource_mut::<CancelAttackOrderRequests>()
+            .0
+            .push(Vec2::splat(100.0));
+        cancel_orders(&mut world);
+        assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 3);
+        world
+            .resource_mut::<CancelAttackOrderRequests>()
+            .0
+            .push(Vec2::X * 7.0 + Vec2::Y * 1.9);
+        cancel_orders(&mut world);
+        assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 1);
+        assert!(world.get::<AttackOrder>(minion).is_none());
+        assert!(world.get::<AttackOrder>(second).is_none());
+    }
+    #[test]
+    fn final_hostile_tracks_then_freezes_and_tower_loss_cleans_up() {
         let (mut world, faction, tower, minion) = setup();
         let enemy = world.spawn_empty().id();
         let target = world
             .spawn((Minion, Position(Vec2::X * 4.0), Allegiance(enemy)))
             .id();
-        world
-            .resource_mut::<AttackOrderRequests>()
-            .0
-            .push(Vec2::X * 4.0);
+        draw(&mut world, vec![Vec2::X * 4.0]);
         apply_orders(&mut world);
-        world.get_mut::<Position>(target).unwrap().0 = Vec2::X * 5.0;
-        apply_orders(&mut world);
-        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::X * 5.0);
-        world.get_mut::<Allegiance>(target).unwrap().0 = faction;
         world.get_mut::<Position>(target).unwrap().0 = Vec2::X * 9.0;
         apply_orders(&mut world);
-        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::X * 5.0);
-        world.despawn(tower);
+        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::X * 9.0);
+        world.get_mut::<Allegiance>(target).unwrap().0 = faction;
+        world.get_mut::<Position>(target).unwrap().0 = Vec2::X * 20.0;
         apply_orders(&mut world);
+        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::X * 9.0);
+        world.resource_mut::<MatchState>().paused = true;
+        world.despawn(tower);
+        cancel_orders(&mut world);
         assert!(world.get::<AttackOrder>(minion).is_none());
         assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 0);
     }
     #[test]
-    fn orders_only_use_player_origin_even_near_other_towers() {
-        let (mut world, faction, player, minion) = setup();
-        let other = world
-            .spawn((
-                Tower { slot: 1 },
-                Position(Vec2::X * 100.0),
-                Allegiance(faction),
-            ))
-            .id();
-        let foreign = world
-            .spawn((
-                Minion,
-                OriginTower(other),
-                Position(Vec2::X * 100.0),
-                Allegiance(faction),
-                Movement {
-                    speed: 1.0,
-                    target: Vec2::ZERO,
-                    retarget_in: 0.0,
-                },
-            ))
-            .id();
-        world
-            .resource_mut::<AttackOrderRequests>()
-            .0
-            .push(Vec2::X * 100.0);
+    fn hostile_endpoint_holds_follower_within_attack_range() {
+        let (mut world, _, _, minion) = setup();
+        let enemy = world.spawn_empty().id();
+        world.spawn((Minion, Position(Vec2::X * 4.0), Allegiance(enemy)));
+        world.entity_mut(minion).insert(Attack {
+            damage: 1.0,
+            range: 5.0,
+            cooldown: 1.0,
+            remaining: 0.0,
+        });
+        draw(&mut world, vec![Vec2::X * 4.0]);
         apply_orders(&mut world);
-        let trail = world.get::<AttackOrder>(minion).unwrap().trail;
-        assert_eq!(world.get::<AttackTrail>(trail).unwrap().tower, player);
-        assert!(world.get::<AttackOrder>(foreign).is_none());
-        world.despawn(player);
-        world
-            .resource_mut::<AttackOrderRequests>()
-            .0
-            .push(Vec2::X * 100.0);
-        apply_orders(&mut world);
-        assert!(world.get::<AttackOrder>(minion).is_none());
-        assert!(world.get::<AttackOrder>(foreign).is_none());
-        assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 0);
+        assert!(world.get::<AttackOrder>(minion).is_some());
+        assert_eq!(world.get::<Movement>(minion).unwrap().target, Vec2::ZERO);
     }
-
     #[test]
-    fn cancels_nearest_trail_only_when_clicked_near_while_paused() {
-        let (mut world, faction, tower, minion) = setup();
-        let other_minion = world
-            .spawn((
-                Minion,
-                OriginTower(tower),
-                Position(Vec2::X * 20.0),
-                Allegiance(faction),
-                Movement {
-                    speed: 1.0,
-                    target: Vec2::ZERO,
-                    retarget_in: 0.0,
-                },
-            ))
-            .id();
-        world
-            .resource_mut::<AttackOrderRequests>()
-            .0
-            .push(Vec2::X * 2.0);
+    fn restart_removes_paths_and_followers() {
+        let (mut world, _, _, minion) = setup();
+        draw(&mut world, vec![Vec2::X]);
         apply_orders(&mut world);
-        world
-            .resource_mut::<AttackOrderRequests>()
-            .0
-            .push(Vec2::X * 4.0);
+        world.resource_mut::<MatchState>().restart_requested = true;
         apply_orders(&mut world);
-        let first_trail = world.get::<AttackOrder>(minion).unwrap().trail;
-        let nearest_trail = world.get::<AttackOrder>(other_minion).unwrap().trail;
-        world.resource_mut::<MatchState>().paused = true;
-        world
-            .resource_mut::<CancelAttackOrderRequests>()
-            .0
-            .push(Vec2::X * 10000.0);
-        cancel_orders(&mut world);
-        assert_eq!(world.get::<AttackOrder>(minion).unwrap().trail, first_trail);
-        assert_eq!(
-            world.get::<AttackOrder>(other_minion).unwrap().trail,
-            nearest_trail
-        );
-        world
-            .resource_mut::<CancelAttackOrderRequests>()
-            .0
-            .push(Vec2::X * 3.5);
-        cancel_orders(&mut world);
-        assert_eq!(world.get::<AttackOrder>(minion).unwrap().trail, first_trail);
-        assert!(world.get::<AttackOrder>(other_minion).is_none());
-        assert!(world.get_entity(nearest_trail).is_err());
-    }
-
-    #[test]
-    fn paused_tower_loss_removes_trails_without_fallback() {
-        let (mut world, _, tower, minion) = setup();
-        world.resource_mut::<AttackOrderRequests>().0.push(Vec2::X);
-        apply_orders(&mut world);
-        world.resource_mut::<MatchState>().paused = true;
-        world.despawn(tower);
-        cancel_orders(&mut world);
         assert!(world.get::<AttackOrder>(minion).is_none());
         assert_eq!(world.query::<&AttackTrail>().iter(&world).count(), 0);
     }

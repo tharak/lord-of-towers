@@ -1106,7 +1106,8 @@ mod tests {
             .world_mut()
             .spawn(AttackTrail {
                 tower: Entity::PLACEHOLDER,
-                assigned: attacker,
+                path_id: 0,
+                sequence: 0,
                 target: Some(target),
             })
             .id();

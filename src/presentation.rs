@@ -13,7 +13,6 @@ impl Plugin for PresentationPlugin {
                 (
                     keyboard_controls,
                     button_controls,
-                    browser_state,
                     attach_visuals,
                     sync_donut_visuals,
                     sync_visuals,
@@ -23,6 +22,7 @@ impl Plugin for PresentationPlugin {
                     ground_colors,
                     update_hud,
                     camera_controls,
+                    browser_state,
                 )
                     .chain(),
             );
@@ -645,6 +645,7 @@ fn browser_state(
     minions: Query<(), With<Minion>>,
     towers: Query<(), With<Tower>>,
     deposits: Query<&RawElement, With<RawElementDeposit>>,
+    crown: Query<(), With<DonutVisual>>,
     inventories: Query<(&RawElement, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>,
     trails: Query<(), With<Trail>>,
     economy: Res<RawElementEconomy>,
@@ -668,6 +669,7 @@ fn browser_state(
             ("data-elapsed", state.elapsed.to_string()),
             ("data-inspector", inspector.open.to_string()),
             ("data-raw-deposits", deposits.iter().count().to_string()),
+            ("data-donut-visuals", crown.iter().count().to_string()),
             (
                 "data-raw-remaining",
                 deposits

@@ -207,7 +207,7 @@ fn setup(
                 Name::new("Camera instructions"),
                 EntityKind::Ui,
                 Text::new(
-                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart",
+                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nLeft click/tap: order   Right click: cancel trail",
                 ),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -912,7 +912,7 @@ fn browser_state(
     state: Res<MatchState>,
     inspector: Res<InspectorState>,
     minions: Query<(), With<Minion>>,
-    towers: Query<(), With<Tower>>,
+    towers: Query<Option<&PlayerControlled>, With<Tower>>,
     deposits: Query<&RawElement, With<RawElementDeposit>>,
     crown: Query<(), With<DonutVisual>>,
     inventories: Query<(&RawElement, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>,
@@ -936,6 +936,14 @@ fn browser_state(
             ("data-ready", "true".to_string()),
             ("data-minions", minions.iter().count().to_string()),
             ("data-towers", towers.iter().count().to_string()),
+            (
+                "data-player-towers",
+                towers
+                    .iter()
+                    .filter(|controlled| controlled.is_some())
+                    .count()
+                    .to_string(),
+            ),
             ("data-paused", state.paused.to_string()),
             ("data-speed", state.speed.to_string()),
             ("data-elapsed", state.elapsed.to_string()),

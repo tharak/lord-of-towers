@@ -41,6 +41,7 @@
       if (!document.hidden) document.querySelector('#game-status').setAttribute('data-resumed', 'true');
     });
     const probe = document.createElement('canvas');
+    document.querySelector('#game').addEventListener('contextmenu', event => event.preventDefault());
     if (!probe.getContext('webgl2')) {
       showError(new Error('WebGL2 is unavailable.'));
     } else {

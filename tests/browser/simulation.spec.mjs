@@ -17,6 +17,7 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await expect(page.locator('#loading')).toBeHidden();
   await expect(page.locator('#error')).toBeHidden();
   await expect(status).toHaveAttribute('data-towers', '5');
+  await expect(status).toHaveAttribute('data-player-towers', '1');
   await expect(status).toHaveAttribute('data-raw-deposits', '30');
   await expect(status).toHaveAttribute('data-tower-beacons', '5');
   await expect.poll(async () => Number(await status.getAttribute('data-minions'))).toBeGreaterThanOrEqual(15);
@@ -30,6 +31,8 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await page.locator('#game').focus();
   await page.keyboard.press('Space');
   await expect(status).toHaveAttribute('data-paused', 'true');
+  await page.mouse.click(720, 450, { button: 'right' });
+  await expect(status).toHaveAttribute('data-attack-trails', '0');
   const elapsed = Number(await status.getAttribute('data-elapsed'));
   const pulses = await status.getAttribute('data-energy-pulses');
   const minions = Number(await status.getAttribute('data-minions'));
@@ -83,6 +86,7 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await expect(status).toHaveAttribute('data-tower-beacons', '5');
   await expect(status).toHaveAttribute('data-energy-orbs', await status.getAttribute('data-total-minion-energy'));
   await expect(status).toHaveAttribute('data-towers', '5');
+  await expect(status).toHaveAttribute('data-player-towers', '1');
   await page.setViewportSize({ width: 1100, height: 700 });
   await expect.poll(async () => page.locator('#game').evaluate(el => el.clientWidth)).toBe(1100);
   await page.screenshot({ path: testInfo.outputPath('battlefield.png') });

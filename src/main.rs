@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use lord_of_towers::{
     energy::EnergyPlugin, gathering::GatheringPlugin, influence::InfluencePlugin,
-    inspector::InspectorPlugin, presentation::PresentationPlugin, simulation::SimulationPlugin,
+    inspector::InspectorPlugin, orders::OrdersPlugin, presentation::PresentationPlugin,
+    simulation::SimulationPlugin,
 };
 
 fn main() {
@@ -33,6 +34,7 @@ fn main() {
             SimulationPlugin,
             EnergyPlugin,
             GatheringPlugin,
+            OrdersPlugin,
             InfluencePlugin,
             InspectorPlugin,
             PresentationPlugin,

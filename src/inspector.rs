@@ -42,13 +42,18 @@ enum InspectorAction {
     Components,
     Close,
 }
-const KINDS: [EntityKind; 11] = [
+const KINDS: [EntityKind; 16] = [
     EntityKind::Faction,
     EntityKind::Tower,
     EntityKind::Minion,
     EntityKind::RawElementDeposit,
     EntityKind::Trail,
+    EntityKind::AttackTrail,
     EntityKind::DonutVisual,
+    EntityKind::EnergyOrbVisual,
+    EntityKind::EnergyProjectile,
+    EntityKind::StackVisual,
+    EntityKind::TowerBeacon,
     EntityKind::Link,
     EntityKind::Battlefield,
     EntityKind::Camera,

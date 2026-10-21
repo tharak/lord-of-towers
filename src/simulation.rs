@@ -25,6 +25,7 @@ impl Plugin for SimulationPlugin {
                     SimSet::Spawn,
                     SimSet::Index,
                     SimSet::Target,
+                    SimSet::Orders,
                     SimSet::Movement,
                     SimSet::Combat,
                     SimSet::Capture,

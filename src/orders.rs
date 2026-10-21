@@ -3,6 +3,20 @@ use crate::{inspector::InspectorState, model::*};
 use bevy::{prelude::*, window::PrimaryWindow};
 
 const ATTACK_TRAIL_CANCEL_RADIUS: f32 = 2.0;
+const ATTACK_PATH_SPACING: f32 = 0.8;
+const MAX_ATTACK_PATH_POINTS: usize = 1024;
+
+#[derive(Clone, Copy)]
+enum DrawingPointer {
+    Mouse,
+    Touch(u64),
+}
+
+#[derive(Resource, Default)]
+struct DrawingAttackPath {
+    pointer: Option<DrawingPointer>,
+    points: Vec<Vec2>,
+}
 
 pub struct OrdersPlugin;
 impl Plugin for OrdersPlugin {
@@ -10,6 +24,7 @@ impl Plugin for OrdersPlugin {
         app.init_resource::<AttackOrderRequests>()
             .init_resource::<CancelAttackOrderRequests>()
             .init_resource::<AttackPathIds>()
+            .init_resource::<DrawingAttackPath>()
             .add_systems(Update, (gather_pointer_orders, cancel_orders).chain())
             .add_systems(
                 FixedUpdate,
@@ -31,6 +46,7 @@ fn gather_pointer_orders(
     state: Res<MatchState>,
     mut requests: ResMut<AttackOrderRequests>,
     mut cancellations: ResMut<CancelAttackOrderRequests>,
+    mut drawing: ResMut<DrawingAttackPath>,
 ) {
     if state.restart_requested
         || state.browser_hidden
@@ -40,48 +56,101 @@ fn gather_pointer_orders(
             .iter()
             .any(|interaction| *interaction != Interaction::None)
     {
+        drawing.pointer = None;
+        drawing.points.clear();
         return;
     }
     let Ok(window) = windows.single() else { return };
     let Ok((camera, transform)) = cameras.single() else {
         return;
     };
-    let touch_points: Vec<_> = touches.as_ref().map_or_else(Vec::new, |touches| {
-        touches
-            .iter_just_pressed()
-            .map(|touch| touch.position())
-            .collect()
-    });
-    let mut points = touch_points;
-    // Browsers can synthesize mouse events for touches; enqueue each gesture once.
-    if points.is_empty()
-        && mouse
-            .as_ref()
-            .is_some_and(|mouse| mouse.just_pressed(MouseButton::Left))
-    {
-        points.extend(window.cursor_position());
-    }
-    let cancel_point = mouse
-        .as_ref()
-        .filter(|mouse| mouse.just_pressed(MouseButton::Right))
-        .and_then(|_| window.cursor_position());
-    for (point, cancel) in points
-        .into_iter()
-        .map(|point| (point, false))
-        .chain(cancel_point.map(|point| (point, true)))
-    {
-        let Ok(ray) = camera.viewport_to_world(transform, point) else {
-            continue;
-        };
-        if let Some(distance) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) {
-            let point = ray.get_point(distance);
-            let point = Vec2::new(point.x, point.z);
-            if cancel {
-                cancellations.0.push(point);
-            } else {
-                requests.0.push(vec![point]);
+    let mouse = mouse.as_deref();
+    let touches = touches.as_deref();
+    if drawing.pointer.is_none() {
+        if let Some(touch) = touches.and_then(|touches| touches.iter_just_pressed().next()) {
+            drawing.pointer = Some(DrawingPointer::Touch(touch.id()));
+            if let Some(point) = ground_point(camera, transform, touch.position()) {
+                append_path_point(&mut drawing.points, point);
+            }
+        } else if mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Left))
+            && touches.is_none_or(|touches| !touches.any_just_released())
+        {
+            drawing.pointer = Some(DrawingPointer::Mouse);
+            if let Some(point) = window
+                .cursor_position()
+                .and_then(|position| ground_point(camera, transform, position))
+            {
+                append_path_point(&mut drawing.points, point);
             }
         }
+    }
+    let mut finished = false;
+    match drawing.pointer {
+        Some(DrawingPointer::Mouse) => {
+            if let Some(point) = window
+                .cursor_position()
+                .and_then(|position| ground_point(camera, transform, position))
+            {
+                append_path_point(&mut drawing.points, point);
+            }
+            finished = mouse.is_none_or(|mouse| mouse.just_released(MouseButton::Left));
+        }
+        Some(DrawingPointer::Touch(id)) => {
+            if let Some(touch) = touches.and_then(|touches| touches.get_pressed(id)) {
+                if let Some(point) = ground_point(camera, transform, touch.position()) {
+                    append_path_point(&mut drawing.points, point);
+                }
+            }
+            if let Some(touch) = touches.and_then(|touches| touches.get_released(id)) {
+                if let Some(point) = ground_point(camera, transform, touch.position()) {
+                    append_path_point(&mut drawing.points, point);
+                }
+                finished = true;
+            } else if touches.is_none_or(|touches| touches.just_canceled(id)) {
+                drawing.pointer = None;
+                drawing.points.clear();
+            }
+        }
+        None => {}
+    }
+    if finished {
+        drawing.pointer = None;
+        if !drawing.points.is_empty() {
+            requests.0.push(std::mem::take(&mut drawing.points));
+        }
+    }
+    if mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Right))
+        && let Some(point) = window
+            .cursor_position()
+            .and_then(|position| ground_point(camera, transform, position))
+    {
+        cancellations.0.push(point);
+    }
+}
+
+fn ground_point(camera: &Camera, transform: &GlobalTransform, point: Vec2) -> Option<Vec2> {
+    let ray = camera.viewport_to_world(transform, point).ok()?;
+    let distance = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))?;
+    let point = ray.get_point(distance);
+    let ground = Vec2::new(point.x, point.z);
+    ground.is_finite().then_some(ground)
+}
+
+fn append_path_point(points: &mut Vec<Vec2>, point: Vec2) {
+    if !point.is_finite() || points.len() >= MAX_ATTACK_PATH_POINTS {
+        return;
+    }
+    let Some(start) = points.last().copied() else {
+        points.push(point);
+        return;
+    };
+    let distance = start.distance(point);
+    if distance < 0.001 {
+        return;
+    }
+    let steps = (distance / ATTACK_PATH_SPACING).ceil() as usize;
+    for step in 1..=steps.min(MAX_ATTACK_PATH_POINTS - points.len()) {
+        points.push(start.lerp(point, step as f32 / steps as f32));
     }
 }
 
@@ -359,6 +428,20 @@ fn distance_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn drawn_path_samples_long_strokes_and_keeps_endpoints() {
+        let mut points = Vec::new();
+        append_path_point(&mut points, Vec2::ZERO);
+        append_path_point(&mut points, Vec2::X * 5.0);
+        assert_eq!(points.first(), Some(&Vec2::ZERO));
+        assert_eq!(points.last(), Some(&(Vec2::X * 5.0)));
+        assert!(points.len() > 2);
+        assert!(
+            points
+                .windows(2)
+                .all(|pair| pair[0].distance(pair[1]) <= ATTACK_PATH_SPACING + 0.001)
+        );
+    }
     fn setup() -> (World, Entity, Entity, Entity) {
         let mut world = World::new();
         world.init_resource::<MatchState>();

@@ -28,6 +28,8 @@ impl Plugin for SimulationPlugin {
                     SimSet::Movement,
                     SimSet::Combat,
                     SimSet::Capture,
+                    SimSet::Gathering,
+                    SimSet::PaidSpawn,
                     SimSet::Energy,
                     SimSet::Influence,
                     SimSet::Victory,
@@ -37,17 +39,8 @@ impl Plugin for SimulationPlugin {
             )
             .add_systems(Startup, setup_match)
             .add_systems(PreUpdate, restart_match)
-            .add_systems(
-                FixedUpdate,
-                (advance_clock, spawn_minions).chain().in_set(SimSet::Spawn),
-            )
+            .add_systems(FixedUpdate, advance_clock.in_set(SimSet::Spawn))
             .add_systems(FixedUpdate, rebuild_index.in_set(SimSet::Index))
-            .add_systems(
-                FixedUpdate,
-                (choose_energy_targets, choose_targets)
-                    .chain()
-                    .in_set(SimSet::Target),
-            )
             .add_systems(FixedUpdate, move_minions.in_set(SimSet::Movement))
             .add_systems(
                 FixedUpdate,
@@ -56,6 +49,7 @@ impl Plugin for SimulationPlugin {
                     .in_set(SimSet::Combat),
             )
             .add_systems(FixedUpdate, resolve_damage.in_set(SimSet::Capture))
+            .add_systems(FixedUpdate, spawn_minions.in_set(SimSet::PaidSpawn))
             .add_systems(FixedUpdate, check_victory.in_set(SimSet::Victory));
     }
 }
@@ -120,7 +114,13 @@ fn setup_match(
     mut sequence: ResMut<SpawnSequence>,
 ) {
     sequence.0 = 5;
-    create_match(&mut commands, &config, &mut factions, &mut random);
+    create_match(
+        &mut commands,
+        &config,
+        &mut factions,
+        &mut random,
+        &mut sequence,
+    );
 }
 
 fn create_match(
@@ -128,6 +128,7 @@ fn create_match(
     config: &SimulationConfig,
     factions: &mut FactionEntities,
     random: &mut RandomStream,
+    sequence: &mut SpawnSequence,
 ) {
     random.0 = config.seed;
     factions.0.clear();
@@ -143,31 +144,43 @@ fn create_match(
         factions.0.push(faction);
         let angle = index as f32 * std::f32::consts::TAU / 5.0 - std::f32::consts::FRAC_PI_2;
         let position = Vec2::from_angle(angle) * 32.0_f32.min(config.half_extent * 0.75);
-        commands.spawn((
-            Name::new(format!("{name} tower")),
-            EntityKind::Tower,
-            MatchEntity,
-            Tower { slot: index },
-            ForwardingCursor::default(),
-            SimulationId(index as u64),
-            Allegiance(faction),
-            Position(position),
-            Health {
-                current: config.tower_health,
-                max: config.tower_health,
-            },
-            Spawner {
-                elapsed: 0.0,
-                interval: config.spawn_interval,
-                cap: config.population_cap,
-            },
-            InfluenceEmitter {
-                radius: 15.0,
-                strength: 4.0,
-            },
-        ));
+        let tower = commands
+            .spawn((
+                Name::new(format!("{name} tower")),
+                EntityKind::Tower,
+                MatchEntity,
+                Tower { slot: index },
+                ForwardingCursor::default(),
+                SimulationId(index as u64),
+                Allegiance(faction),
+                Position(position),
+                Health {
+                    current: config.tower_health,
+                    max: config.tower_health,
+                },
+                Spawner {
+                    cap: config.population_cap,
+                },
+                RawElement(0),
+                InfluenceEmitter {
+                    radius: 15.0,
+                    strength: 4.0,
+                },
+            ))
+            .id();
+        for _ in 0..config.starting_minions.min(config.population_cap) {
+            spawn_minion(
+                commands,
+                config,
+                random,
+                sequence,
+                tower,
+                position,
+                Allegiance(faction),
+            );
+        }
     }
-    crate::energy::pickups::spawn_pickups(commands, config);
+    crate::gathering::spawn_deposits(commands, config);
 }
 
 fn restart_match(
@@ -203,102 +216,142 @@ fn restart_match(
     if let Some(mut field) = field {
         field.clear();
     }
-    create_match(&mut commands, &config, &mut factions, &mut random);
+    create_match(
+        &mut commands,
+        &config,
+        &mut factions,
+        &mut random,
+        &mut sequence,
+    );
 }
 
 fn advance_clock(time: Res<Time<Fixed>>, mut state: ResMut<MatchState>) {
     state.elapsed += simulation_delta(&time, &state);
 }
 
+fn spawn_minion(
+    commands: &mut Commands,
+    config: &SimulationConfig,
+    random: &mut RandomStream,
+    sequence: &mut SpawnSequence,
+    tower: Entity,
+    position: Vec2,
+    allegiance: Allegiance,
+) {
+    let direction = random.direction();
+    let location = (position + direction * 2.8).clamp(
+        Vec2::splat(-config.half_extent),
+        Vec2::splat(config.half_extent),
+    );
+    let stable_id = sequence.0;
+    sequence.0 += 1;
+    commands.spawn((
+        (
+            SimulationId(stable_id),
+            EnergyStore {
+                current: config.initial_energy.min(config.energy_capacity),
+                capacity: config.energy_capacity,
+            },
+            ForwardingCursor::default(),
+            RawElement(0),
+            Vision {
+                radius: config.vision_radius,
+            },
+            GatheringState::Exploring,
+        ),
+        (
+            Name::new("Minion"),
+            EntityKind::Minion,
+            MatchEntity,
+            Minion,
+            allegiance,
+            OriginTower(tower),
+            Position(location),
+            Health {
+                current: config.minion_health,
+                max: config.minion_health,
+            },
+            Movement {
+                speed: config.minion_speed,
+                target: location + direction,
+                retarget_in: 0.0,
+            },
+            Attack {
+                damage: 10.0,
+                range: 1.6,
+                cooldown: 0.8,
+                remaining: 0.0,
+            },
+            InfluenceEmitter {
+                radius: 5.0,
+                strength: 1.0,
+            },
+        ),
+    ));
+}
+
 fn spawn_minions(
     mut commands: Commands,
-    time: Res<Time<Fixed>>,
-    state: Res<MatchState>,
     config: Res<SimulationConfig>,
     mut random: ResMut<RandomStream>,
-    mut towers: Query<(Entity, &Position, &Allegiance, &mut Spawner, &Tower)>,
+    mut towers: Query<(
+        Entity,
+        &Position,
+        &Allegiance,
+        &Spawner,
+        &Tower,
+        &mut RawElement,
+    )>,
     mut sequence: ResMut<SpawnSequence>,
     minions: Query<&OriginTower, With<Minion>>,
+    mut economy: ResMut<RawElementEconomy>,
 ) {
-    let dt = simulation_delta(&time, &state);
     let mut counts = HashMap::<Entity, usize>::new();
     for origin in &minions {
         *counts.entry(origin.0).or_default() += 1;
     }
-    // Stable order makes seeded spawn variation reproducible after restart.
     let mut order: Vec<_> = towers
         .iter()
-        .map(|(entity, _, _, _, tower)| (tower.slot, entity))
+        .map(|(entity, _, _, _, tower, _)| (tower.slot, entity))
         .collect();
     order.sort_by_key(|(slot, _)| *slot);
+    // A zero configured cost must never create an unbounded free-spawning loop.
+    let cost = config.minion_raw_cost.max(1);
     for (_, entity) in order {
-        let Ok((tower, position, allegiance, mut spawner, _)) = towers.get_mut(entity) else {
+        let Ok((tower, position, allegiance, spawner, _, mut stock)) = towers.get_mut(entity)
+        else {
             continue;
         };
-        spawner.elapsed += dt;
-        let interval = spawner.interval.max(0.01);
         let count = counts.entry(tower).or_default();
-        if *count >= spawner.cap {
-            spawner.elapsed = spawner.elapsed.min(interval);
-            continue;
-        }
-        while spawner.elapsed >= interval && *count < spawner.cap {
-            spawner.elapsed -= interval;
+        while stock.0 >= cost && *count < spawner.cap {
+            stock.0 -= cost;
+            economy.spent += cost;
             *count += 1;
-            let direction = random.direction();
-            let location = (position.0 + direction * 2.8).clamp(
-                Vec2::splat(-config.half_extent),
-                Vec2::splat(config.half_extent),
-            );
-            let stable_id = sequence.0;
-            sequence.0 += 1;
-            commands.spawn((
-                SimulationId(stable_id),
-                EnergyStore {
-                    current: config.initial_energy.min(config.energy_capacity),
-                    capacity: config.energy_capacity,
-                },
-                ForwardingCursor::default(),
-                Name::new("Minion"),
-                EntityKind::Minion,
-                MatchEntity,
-                Minion,
+            spawn_minion(
+                &mut commands,
+                &config,
+                &mut random,
+                &mut sequence,
+                tower,
+                position.0,
                 *allegiance,
-                OriginTower(tower),
-                Position(location),
-                Health {
-                    current: config.minion_health,
-                    max: config.minion_health,
-                },
-                Movement {
-                    speed: config.minion_speed,
-                    target: location + direction,
-                    retarget_in: 0.0,
-                },
-                Attack {
-                    damage: 10.0,
-                    range: 1.6,
-                    cooldown: 0.8,
-                    remaining: 0.0,
-                },
-                InfluenceEmitter {
-                    radius: 5.0,
-                    strength: 1.0,
-                },
-            ));
+            );
         }
     }
 }
 
 fn rebuild_index(
     mut spatial: ResMut<SpatialIndex>,
-    units: Query<(
-        Entity,
-        &Position,
-        &Allegiance,
-        Option<&Tower>,
-        Option<&SimulationId>,
-    )>,
+    units: Query<
+        (
+            Entity,
+            &Position,
+            &Allegiance,
+            Option<&Tower>,
+            Option<&SimulationId>,
+        ),
+        Or<(With<Tower>, With<Minion>)>,
+    >,
 ) {
     spatial.0.clear();
     for (entity, position, faction, tower, stable_id) in &units {
@@ -319,191 +372,18 @@ fn rebuild_index(
     }
 }
 
-/// Empty units override combat every step; zero retarget delay resumes AI on refill.
-fn choose_energy_targets(
-    config: Res<SimulationConfig>,
-    pickups: Query<(&Position, &SimulationId, &EnergyPickup)>,
-    towers: Query<(&Position, &Allegiance, &SimulationId), With<Tower>>,
-    suppliers: Query<
-        (
-            Entity,
-            &Position,
-            &Allegiance,
-            &SimulationId,
-            &SupplyConnection,
-        ),
-        With<Minion>,
-    >,
-    mut minions: Query<(Entity, &Position, &Allegiance, &EnergyStore, &mut Movement), With<Minion>>,
-) {
-    for (entity, position, faction, energy, mut movement) in &mut minions {
-        if energy.current != 0 {
-            continue;
-        }
-        movement.retarget_in = 0.0;
-        let nearby_pickup = pickups
-            .iter()
-            .filter(|(point, _, pickup)| {
-                pickup.available
-                    && point.0.distance_squared(position.0) <= config.energy_seek_radius.powi(2)
-            })
-            .map(|(point, id, _)| (point.0, id.0));
-        let nearest = |a: &(Vec2, u64), b: &(Vec2, u64)| {
-            position
-                .0
-                .distance_squared(a.0)
-                .total_cmp(&position.0.distance_squared(b.0))
-                .then(a.1.cmp(&b.1))
-        };
-        if let Some((target, _)) = nearby_pickup.min_by(nearest) {
-            movement.target = target;
-            continue;
-        }
-        let roots = towers
-            .iter()
-            .filter(|(_, owner, _)| **owner == *faction)
-            .map(|(point, _, id)| (point.0, id.0));
-        let connected = suppliers
-            .iter()
-            .filter(|(supplier, _, owner, _, connection)| {
-                *supplier != entity
-                    && **owner == *faction
-                    && towers
-                        .get(connection.root)
-                        .is_ok_and(|(_, root_owner, _)| *root_owner == *faction)
-            })
-            .map(|(_, point, _, id, _)| (point.0, id.0));
-        movement.target = roots
-            .chain(connected)
-            .min_by(nearest)
-            .map_or(position.0, |(point, _)| point);
-    }
-}
-
-fn choose_targets(
-    time: Res<Time<Fixed>>,
-    state: Res<MatchState>,
-    config: Res<SimulationConfig>,
-    spatial: Res<SpatialIndex>,
-    field: Option<Res<InfluenceField>>,
-    factions: Query<&Faction>,
-    towers: Query<(&Position, &Allegiance, &Tower)>,
-    mut minions: Query<
-        (
-            Entity,
-            &Position,
-            &Allegiance,
-            &mut Movement,
-            Option<&SimulationId>,
-            &EnergyStore,
-        ),
-        With<Minion>,
-    >,
-    mut random: ResMut<RandomStream>,
-) {
-    let dt = simulation_delta(&time, &state);
-    let mut order: Vec<_> = minions
-        .iter()
-        .map(|(entity, _, _, _, stable_id, _)| {
-            (stable_id.map_or(entity.to_bits(), |id| id.0), entity)
-        })
-        .collect();
-    order.sort_by_key(|(id, _)| *id);
-    for (_, entity) in order {
-        let Ok((_, position, faction, mut movement, _, energy)) = minions.get_mut(entity) else {
-            continue;
-        };
-        if energy.current == 0 {
-            continue;
-        }
-        movement.retarget_in -= dt;
-        if movement.retarget_in > 0.0 {
-            continue;
-        }
-        movement.retarget_in = 0.35 + random.unit() * 0.25;
-        if let Some(enemy) = spatial
-            .nearby(position.0, 10.0)
-            .filter(|entry| entry.faction != faction.0)
-            .min_by(|a, b| {
-                position
-                    .0
-                    .distance_squared(a.position)
-                    .total_cmp(&position.0.distance_squared(b.position))
-                    .then(a.stable_id.cmp(&b.stable_id))
-            })
-        {
-            movement.target = enemy.position;
-            continue;
-        }
-        let destination = towers
-            .iter()
-            .filter(|(_, allegiance, _)| allegiance.0 != faction.0)
-            .min_by(|(a, _, tower_a), (b, _, tower_b)| {
-                position
-                    .0
-                    .distance_squared(a.0)
-                    .total_cmp(&position.0.distance_squared(b.0))
-                    .then(tower_a.slot.cmp(&tower_b.slot))
-            })
-            .map(|(position, _, _)| position.0)
-            .unwrap_or(Vec2::ZERO);
-        let forward = (destination - position.0).normalize_or_zero();
-        let faction_index = factions.get(faction.0).map_or(0, |f| f.index);
-        // Prefer weakly supported ground while always progressing toward a rival tower.
-        let mut best = destination;
-        let mut score = f32::NEG_INFINITY;
-        for _ in 0..5 {
-            let candidate = (position.0
-                + (forward + random.direction() * 0.65).normalize_or_zero() * 7.0)
-                .clamp(
-                    Vec2::splat(-config.half_extent),
-                    Vec2::splat(config.half_extent),
-                );
-            let support = field
-                .as_ref()
-                .map_or(0.0, |field| field.sample(candidate)[faction_index]);
-            let progress = position.0.distance(destination) - candidate.distance(destination);
-            let value = progress - support.min(8.0) * 0.6 + random.unit() * 0.3;
-            if value > score {
-                score = value;
-                best = candidate;
-            }
-        }
-        movement.target = best;
-    }
-}
-
 fn move_minions(
     time: Res<Time<Fixed>>,
     state: Res<MatchState>,
     config: Res<SimulationConfig>,
     spatial: Res<SpatialIndex>,
-    mut minions: Query<
-        (
-            Entity,
-            &mut Position,
-            &Movement,
-            &Allegiance,
-            &Attack,
-            &EnergyStore,
-        ),
-        With<Minion>,
-    >,
+    mut minions: Query<(Entity, &mut Position, &Movement), With<Minion>>,
 ) {
     let dt = simulation_delta(&time, &state);
-    for (entity, mut position, movement, faction, attack, energy) in &mut minions {
-        let engaged = energy.current > 0
-            && spatial.nearby(position.0, attack.range + 2.0).any(|entry| {
-                entry.faction != faction.0
-                    && position.0.distance(entry.position)
-                        <= attack.range + if entry.tower { 2.0 } else { 0.0 }
-            });
+    for (entity, mut position, movement) in &mut minions {
         let offset = movement.target - position.0;
-        let mut velocity = if engaged {
-            Vec2::ZERO
-        } else {
-            offset.normalize_or_zero() * movement.speed.min(offset.length() / dt.max(0.0001))
-        };
+        let mut velocity =
+            offset.normalize_or_zero() * movement.speed.min(offset.length() / dt.max(0.0001));
         for other in spatial
             .nearby(position.0, 1.1)
             .filter(|entry| entry.entity != entity && !entry.tower)
@@ -527,12 +407,21 @@ fn collect_damage(
     spatial: Res<SpatialIndex>,
     factions: Query<&Faction>,
     mut pending: ResMut<PendingDamage>,
-    mut attackers: Query<(&Position, &Allegiance, &mut Attack, &mut EnergyStore), With<Minion>>,
+    mut attackers: Query<
+        (
+            &Position,
+            &Allegiance,
+            &mut Attack,
+            &mut EnergyStore,
+            &Vision,
+        ),
+        With<Minion>,
+    >,
     config: Res<SimulationConfig>,
 ) {
     pending.0.clear();
     let dt = simulation_delta(&time, &state);
-    for (position, faction, mut attack, mut energy) in &mut attackers {
+    for (position, faction, mut attack, mut energy, vision) in &mut attackers {
         attack.remaining = (attack.remaining - dt).max(0.0);
         if attack.remaining > 0.0 || energy.current < config.attack_energy_cost {
             continue;
@@ -547,6 +436,7 @@ fn collect_damage(
             .nearby(position.0, attack.range + 2.0)
             .filter(|entry| {
                 entry.faction != faction.0
+                    && position.0.distance_squared(entry.position) <= vision.radius.max(0.0).powi(2)
                     && position.0.distance(entry.position)
                         <= attack.range + if entry.tower { 2.0 } else { 0.0 }
             })
@@ -575,19 +465,26 @@ fn resolve_damage(
             &mut Allegiance,
             Option<&mut Spawner>,
             Option<&mut ForwardingCursor>,
+            &Position,
+            Option<&RawElement>,
         ),
         Or<(With<Tower>, With<Minion>)>,
     >,
+    ids: Query<&SimulationId>,
 ) {
-    for (entity, contributions) in pending.0.drain() {
-        let Ok((mut health, mut allegiance, spawner, cursor)) = units.get_mut(entity) else {
+    let mut hits: Vec<_> = pending.0.drain().collect();
+    hits.sort_by_key(|(entity, _)| ids.get(*entity).map_or(entity.to_bits(), |id| id.0));
+    for (entity, contributions) in hits {
+        let Ok((mut health, mut allegiance, spawner, cursor, position, cargo)) =
+            units.get_mut(entity)
+        else {
             continue;
         };
         health.current -= contributions.iter().sum::<f32>();
         if health.current > 0.0 {
             continue;
         }
-        if let Some(mut spawner) = spawner {
+        if spawner.is_some() {
             let mut winner = 0;
             for index in 1..5 {
                 if contributions[index] > contributions[winner] {
@@ -597,12 +494,16 @@ fn resolve_damage(
             if let Some(faction) = factions.0.get(winner) {
                 allegiance.0 = *faction;
                 health.current = health.max;
-                spawner.elapsed = 0.0;
                 if let Some(mut cursor) = cursor {
                     *cursor = ForwardingCursor::default();
                 }
             }
         } else {
+            if let Some(cargo) = cargo
+                && cargo.0 > 0
+            {
+                crate::gathering::drop_cargo(&mut commands, position.0, cargo.0);
+            }
             commands.entity(entity).despawn();
         }
     }
@@ -632,7 +533,7 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(SimulationPlugin);
+            .add_plugins((SimulationPlugin, crate::gathering::GatheringPlugin));
         app.update();
         app
     }
@@ -650,114 +551,93 @@ mod tests {
             .iter(app.world())
             .count()
     }
-
-    #[test]
-    fn spawning_obeys_time_and_origin_cap() {
-        let mut app = app();
-        for mut spawn in app
-            .world_mut()
-            .query::<&mut Spawner>()
-            .iter_mut(app.world_mut())
-        {
-            spawn.cap = 1;
-        }
-        step(&mut app, 59);
-        assert_eq!(count::<Minion>(&mut app), 0);
-        step(&mut app, 2);
-        assert_eq!(count::<Minion>(&mut app), 5);
-        step(&mut app, 120);
-        assert_eq!(count::<Minion>(&mut app), 5);
-    }
-
-    #[test]
-    fn pause_hidden_tab_and_victory_freeze_fixed_simulation() {
-        let mut app = app();
-        app.world_mut().resource_mut::<MatchState>().paused = true;
-        step(&mut app, 90);
-        assert_eq!(count::<Minion>(&mut app), 0);
-        assert_eq!(app.world().resource::<MatchState>().elapsed, 0.0);
-        {
-            let mut state = app.world_mut().resource_mut::<MatchState>();
-            state.paused = false;
-            state.browser_hidden = true;
-        }
-        step(&mut app, 90);
-        assert_eq!(app.world().resource::<MatchState>().elapsed, 0.0);
-        {
-            let mut state = app.world_mut().resource_mut::<MatchState>();
-            state.browser_hidden = false;
-            state.winner = Some(0);
-        }
-        step(&mut app, 90);
-        assert_eq!(app.world().resource::<MatchState>().elapsed, 0.0);
-    }
-
-    #[test]
-    fn restart_removes_old_match_references_and_resets_clock() {
-        let mut app = app();
-        step(&mut app, 70);
-        let old = app.world().resource::<FactionEntities>().0.clone();
+    fn total(app: &mut App) -> u32 {
         app.world_mut()
-            .resource_mut::<MatchState>()
-            .restart_requested = true;
-        app.world_mut().run_schedule(PreUpdate);
-        assert_eq!(count::<Minion>(&mut app), 0);
-        assert_eq!(count::<Tower>(&mut app), 5);
-        assert_eq!(count::<Faction>(&mut app), 5);
-        assert_eq!(app.world().resource::<MatchState>().elapsed, 0.0);
-        for entity in old {
-            assert!(app.world().get_entity(entity).is_err());
-        }
+            .query::<&RawElement>()
+            .iter(app.world())
+            .map(|raw| raw.0)
+            .sum::<u32>()
+            + app.world().resource::<RawElementEconomy>().spent
     }
-
-    #[test]
-    fn simultaneous_damage_kills_both_attackers() {
-        let mut app = app();
-        let factions = app.world().resource::<FactionEntities>().0.clone();
-        for faction in factions.iter().take(2) {
-            app.world_mut().spawn((
-                Minion,
-                EnergyStore {
-                    current: 5,
-                    capacity: 5,
-                },
-                Position(Vec2::ZERO),
-                Allegiance(*faction),
-                Health {
-                    current: 10.0,
-                    max: 10.0,
-                },
-                Attack {
-                    damage: 10.0,
-                    range: 1.6,
-                    cooldown: 0.8,
-                    remaining: 0.0,
-                },
-            ));
-        }
-        step(&mut app, 1);
-        assert_eq!(count::<Minion>(&mut app), 0);
-    }
-
-    #[test]
-    fn capture_uses_damage_then_stable_tie_break_and_preserves_old_army() {
-        let mut app = app();
-        let factions = app.world().resource::<FactionEntities>().0.clone();
-        let tower = app
-            .world_mut()
+    fn tower(app: &mut App) -> Entity {
+        app.world_mut()
             .query_filtered::<Entity, With<Tower>>()
             .iter(app.world())
             .next()
-            .unwrap();
+            .unwrap()
+    }
+
+    #[test]
+    fn startup_armies_have_stable_ids_and_complete_gathering_components() {
+        let mut app = app();
+        assert_eq!(count::<Minion>(&mut app), 15);
+        assert_eq!(count::<RawElementDeposit>(&mut app), 30);
+        assert_eq!(app.world().resource::<SpawnSequence>().0, 20);
+        let mut ids = Vec::new();
+        for (id, energy, raw, vision, state, _) in app
+            .world_mut()
+            .query_filtered::<(
+                &SimulationId,
+                &EnergyStore,
+                &RawElement,
+                &Vision,
+                &GatheringState,
+                &ForwardingCursor,
+            ), With<Minion>>()
+            .iter(app.world())
+        {
+            ids.push(id.0);
+            assert_eq!((energy.current, energy.capacity, raw.0), (5, 5, 0));
+            assert_eq!(vision.radius, 15.0);
+            assert!(matches!(state, GatheringState::Exploring));
+        }
+        ids.sort_unstable();
+        assert_eq!(ids, (5..20).collect::<Vec<_>>());
+        assert_eq!(
+            total(&mut app),
+            app.world().resource::<RawElementEconomy>().initial
+        );
+    }
+
+    #[test]
+    fn paid_spawning_spends_all_affordable_stock_and_respects_origin_cap() {
+        let mut app = app();
+        let tower = tower(&mut app);
+        app.world_mut().get_mut::<RawElement>(tower).unwrap().0 = 17;
+        app.world_mut().get_mut::<Spawner>(tower).unwrap().cap = 5;
+        let mut schedule = Schedule::default();
+        schedule.add_systems(spawn_minions);
+        schedule.run(app.world_mut());
+        assert_eq!(count::<Minion>(&mut app), 17);
+        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 7);
+        assert_eq!(app.world().resource::<RawElementEconomy>().spent, 10);
+        schedule.run(app.world_mut());
+        assert_eq!(count::<Minion>(&mut app), 17);
+        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 7);
+        app.world_mut().get_mut::<Spawner>(tower).unwrap().cap = 100;
+        schedule.run(app.world_mut());
+        assert_eq!(count::<Minion>(&mut app), 18);
+        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 2);
+    }
+
+    #[test]
+    fn capture_retains_stock_and_old_army_and_resets_forwarding() {
+        let mut app = app();
+        let tower = tower(&mut app);
+        let factions = app.world().resource::<FactionEntities>().0.clone();
+        let old_owner = app.world().get::<Allegiance>(tower).unwrap().0;
+        let army: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &OriginTower)>()
+            .iter(app.world())
+            .filter(|(_, origin)| origin.0 == tower)
+            .map(|(entity, _)| entity)
+            .collect();
+        app.world_mut().get_mut::<RawElement>(tower).unwrap().0 = 4;
         app.world_mut()
             .get_mut::<ForwardingCursor>(tower)
             .unwrap()
             .last_recipient = Some(123);
-        let old_owner = app.world().get::<Allegiance>(tower).unwrap().0;
-        let minion = app
-            .world_mut()
-            .spawn((Minion, OriginTower(tower), Allegiance(old_owner)))
-            .id();
         app.world_mut()
             .resource_mut::<PendingDamage>()
             .0
@@ -766,10 +646,7 @@ mod tests {
         schedule.add_systems(resolve_damage);
         schedule.run(app.world_mut());
         assert_eq!(app.world().get::<Allegiance>(tower).unwrap().0, factions[1]);
-        assert_eq!(app.world().get::<Allegiance>(minion).unwrap().0, old_owner);
-        let health = app.world().get::<Health>(tower).unwrap();
-        assert_eq!(health.current, health.max);
-        assert_eq!(app.world().get::<Spawner>(tower).unwrap().elapsed, 0.0);
+        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 4);
         assert_eq!(
             app.world()
                 .get::<ForwardingCursor>(tower)
@@ -777,67 +654,50 @@ mod tests {
                 .last_recipient,
             None
         );
-    }
-
-    #[test]
-    fn ownership_of_all_towers_wins_and_speed_scales_clock() {
-        let mut app = app();
-        app.world_mut().resource_mut::<MatchState>().speed = 4.0;
-        step(&mut app, 1);
-        assert!((app.world().resource::<MatchState>().elapsed - 4.0 / 30.0).abs() < 0.0001);
-        let faction = app.world().resource::<FactionEntities>().0[2];
-        for mut owner in app
-            .world_mut()
-            .query_filtered::<&mut Allegiance, With<Tower>>()
-            .iter_mut(app.world_mut())
-        {
-            owner.0 = faction;
+        for entity in army {
+            assert_eq!(app.world().get::<Allegiance>(entity).unwrap().0, old_owner);
         }
-        step(&mut app, 1);
-        let state = app.world().resource::<MatchState>();
-        assert_eq!(state.winner, Some(2));
-        assert!(state.paused);
+        assert_eq!(count::<Minion>(&mut app), 15);
     }
 
     #[test]
-    fn spatial_queries_cover_negative_cells_and_ignore_out_of_range_units() {
-        let mut index = SpatialIndex::default();
-        let mut world = World::new();
-        let entity = world.spawn_empty().id();
-        let location = Vec2::new(-0.1, -8.1);
-        index
+    fn death_drops_cargo_without_losing_resource() {
+        let mut app = app();
+        let minion = app
+            .world_mut()
+            .query_filtered::<Entity, With<Minion>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        app.world_mut().get_mut::<RawElement>(minion).unwrap().0 = 1;
+        let before = total(&mut app);
+        let deposits = count::<RawElementDeposit>(&mut app);
+        app.world_mut()
+            .resource_mut::<PendingDamage>()
             .0
-            .entry(SpatialIndex::cell(location))
-            .or_default()
-            .push(Neighbor {
-                entity,
-                faction: entity,
-                position: location,
-                tower: false,
-                stable_id: 0,
-            });
-        assert_eq!(index.nearby(Vec2::new(0.1, -7.9), 1.0).count(), 1);
-        assert_eq!(index.nearby(Vec2::new(2.0, -7.9), 1.0).count(), 0);
+            .insert(minion, [100.0, 0.0, 0.0, 0.0, 0.0]);
+        let mut schedule = Schedule::default();
+        schedule.add_systems(resolve_damage);
+        schedule.run(app.world_mut());
+        assert!(app.world().get_entity(minion).is_err());
+        assert_eq!(count::<RawElementDeposit>(&mut app), deposits + 1);
+        assert_eq!(total(&mut app), before);
     }
 
     #[test]
-    fn movement_stays_inside_battlefield() {
+    fn combat_uses_actual_inclusive_vision_and_keeps_gathering_movement() {
         let mut app = app();
         let factions = app.world().resource::<FactionEntities>().0.clone();
-        let unit = app
+        let attacker = app
             .world_mut()
             .spawn((
                 Minion,
+                Position(Vec2::ZERO),
+                Allegiance(factions[0]),
+                Vision { radius: 1.0 },
                 EnergyStore {
                     current: 5,
                     capacity: 5,
-                },
-                Position(Vec2::new(49.9, 49.9)),
-                Allegiance(factions[0]),
-                Movement {
-                    speed: 4.0,
-                    target: Vec2::splat(100.0),
-                    retarget_in: 999.0,
                 },
                 Attack {
                     damage: 10.0,
@@ -845,25 +705,123 @@ mod tests {
                     cooldown: 0.8,
                     remaining: 0.0,
                 },
+                Movement {
+                    speed: 4.0,
+                    target: Vec2::Y * 10.0,
+                    retarget_in: 99.0,
+                },
             ))
             .id();
-        step(&mut app, 30);
-        let position = app.world().get::<Position>(unit).unwrap().0;
-        assert!(position.is_finite());
-        assert!(position.x <= 50.0 && position.y <= 50.0);
+        let target = app
+            .world_mut()
+            .spawn((Minion, Position(Vec2::X * 1.01), Allegiance(factions[1])))
+            .id();
+        let mut combat = Schedule::default();
+        combat.add_systems((rebuild_index, collect_damage).chain());
+        combat.run(app.world_mut());
+        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 5);
+        app.world_mut().get_mut::<Position>(target).unwrap().0 = Vec2::X;
+        combat.run(app.world_mut());
+        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 4);
+        assert!(
+            app.world()
+                .resource::<PendingDamage>()
+                .0
+                .contains_key(&target)
+        );
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .advance_by(std::time::Duration::from_secs_f32(1.0 / 30.0));
+        let mut movement = Schedule::default();
+        movement.add_systems(move_minions);
+        movement.run(app.world_mut());
+        assert!(app.world().get::<Position>(attacker).unwrap().0.y > 0.0);
+        assert_eq!(
+            app.world().get::<Movement>(attacker).unwrap().target,
+            Vec2::Y * 10.0
+        );
+    }
+
+    #[test]
+    fn pause_hidden_and_victory_freeze_simulation() {
+        let mut app = app();
+        let initial = total(&mut app);
+        for mode in 0..3 {
+            {
+                let mut state = app.world_mut().resource_mut::<MatchState>();
+                state.paused = mode == 0;
+                state.browser_hidden = mode == 1;
+                state.winner = (mode == 2).then_some(0);
+            }
+            step(&mut app, 90);
+            assert_eq!(app.world().resource::<MatchState>().elapsed, 0.0);
+            assert_eq!(count::<Minion>(&mut app), 15);
+            assert_eq!(total(&mut app), initial);
+        }
+    }
+
+    #[test]
+    fn restart_resets_resources_layout_armies_links_and_clock() {
+        fn layout(app: &mut App) -> Vec<(u64, Vec2, u32)> {
+            let mut result: Vec<_> = app
+                .world_mut()
+                .query_filtered::<(&SimulationId, &Position, &RawElement), With<RawElementDeposit>>(
+                )
+                .iter(app.world())
+                .map(|(id, position, raw)| (id.0, position.0, raw.0))
+                .collect();
+            result.sort_by_key(|entry| entry.0);
+            result
+        }
+        let mut app = app();
+        app.add_plugins(crate::energy::EnergyPlugin);
+        let original = layout(&mut app);
+        let old = app.world().resource::<FactionEntities>().0.clone();
+        step(&mut app, 200);
+        app.world_mut()
+            .resource_mut::<MatchState>()
+            .restart_requested = true;
+        app.world_mut().run_schedule(PreUpdate);
+        assert_eq!(layout(&mut app), original);
+        assert_eq!(count::<Minion>(&mut app), 15);
+        assert_eq!(count::<Tower>(&mut app), 5);
+        assert_eq!(count::<Trail>(&mut app), 0);
+        assert_eq!(count::<Link>(&mut app), 0);
+        assert_eq!(app.world().resource::<MatchState>().elapsed, 0.0);
+        assert_eq!(app.world().resource::<EnergyClock>().pulses, 0);
+        assert_eq!(app.world().resource::<EnergyClock>().elapsed, 0.0);
+        assert_eq!(app.world().resource::<RawElementEconomy>().spent, 0);
+        assert_eq!(
+            total(&mut app),
+            app.world().resource::<RawElementEconomy>().initial
+        );
+        for entity in old {
+            assert!(app.world().get_entity(entity).is_err());
+        }
+        for raw in app
+            .world_mut()
+            .query_filtered::<&RawElement, Or<(With<Minion>, With<Tower>)>>()
+            .iter(app.world())
+        {
+            assert_eq!(raw.0, 0);
+        }
     }
 
     #[test]
     #[ignore = "extended run invoked by scheduled/manual GitHub Actions"]
-    fn extended_simulation_remains_bounded() {
+    fn extended_simulation_remains_bounded_and_conserves_raw_element() {
         let mut app = app();
         app.add_plugins(crate::energy::EnergyPlugin);
+        let initial = app.world().resource::<RawElementEconomy>().initial;
         for _ in 0..180 {
             step(&mut app, 100);
-            assert!(count::<Minion>(&mut app) <= 500);
+            let minions = count::<Minion>(&mut app);
+            assert!(minions <= 500);
             assert_eq!(count::<Tower>(&mut app), 5);
-            assert_eq!(count::<EnergyPickup>(&mut app), 30);
-            assert!(count::<Link>(&mut app) <= count::<Minion>(&mut app));
+            assert!(count::<RawElementDeposit>(&mut app) as u32 <= initial);
+            assert!(count::<Trail>(&mut app) <= 500 * 100);
+            assert!(count::<Link>(&mut app) <= minions);
+            assert_eq!(total(&mut app), initial);
             for energy in app.world_mut().query::<&EnergyStore>().iter(app.world()) {
                 assert!(energy.current <= energy.capacity);
             }
@@ -876,216 +834,32 @@ mod tests {
                 assert!(position.0.abs().max_element() <= 50.0);
                 assert!(health.current > 0.0 && health.current <= health.max);
             }
-            let factions = app.world().resource::<FactionEntities>().0.clone();
-            for owner in app.world_mut().query::<&Allegiance>().iter(app.world()) {
-                assert!(factions.contains(&owner.0));
-            }
         }
     }
-
     #[test]
-    fn restart_replays_seeded_movement_despite_entity_reallocation() {
-        fn snapshot(app: &mut App) -> Vec<(u64, Vec2, Vec2)> {
-            let mut result: Vec<_> = app
-                .world_mut()
-                .query::<(&SimulationId, &Position, &Movement)>()
-                .iter(app.world())
-                .map(|(id, position, movement)| (id.0, position.0, movement.target))
-                .collect();
-            result.sort_by_key(|entry| entry.0);
-            result
-        }
+    fn trails_are_not_combat_or_separation_targets() {
         let mut app = app();
-        step(&mut app, 180);
-        let original = snapshot(&mut app);
-        assert!(!original.is_empty());
-        app.world_mut()
-            .resource_mut::<MatchState>()
-            .restart_requested = true;
-        app.world_mut().run_schedule(PreUpdate);
-        step(&mut app, 180);
-        assert_eq!(snapshot(&mut app), original);
-    }
-
-    fn fighter(app: &mut App, faction: Entity, position: Vec2, energy: u8, id: u64) -> Entity {
-        app.world_mut()
+        let owner = app.world().resource::<FactionEntities>().0[0];
+        let trail = app
+            .world_mut()
             .spawn((
-                Minion,
-                SimulationId(id),
-                Position(position),
-                Allegiance(faction),
-                EnergyStore {
-                    current: energy,
-                    capacity: 5,
-                },
-                Health {
-                    current: 30.0,
-                    max: 30.0,
-                },
-                Attack {
-                    damage: 10.0,
-                    range: 1.6,
-                    cooldown: 0.8,
-                    remaining: 0.0,
-                },
-                Movement {
-                    speed: 4.0,
-                    target: position,
-                    retarget_in: 999.0,
+                Position(Vec2::ZERO),
+                Allegiance(owner),
+                Trail {
+                    trip: 0,
+                    sequence: 0,
+                    remaining: 30.0,
                 },
             ))
-            .id()
-    }
-
-    #[test]
-    fn attacks_charge_only_when_a_target_is_hit_and_never_underflow() {
-        let mut app = app();
-        let factions = app.world().resource::<FactionEntities>().0.clone();
-        let attacker = fighter(&mut app, factions[0], Vec2::ZERO, 1, 100);
-        step(&mut app, 1);
-        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 1);
-        let target = fighter(&mut app, factions[1], Vec2::X, 0, 101);
-        // A stationary empty target isolates attack accounting from seeking movement.
-        app.world_mut().get_mut::<Movement>(target).unwrap().speed = 0.0;
-        step(&mut app, 1);
-        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 0);
-        assert_eq!(app.world().get::<Health>(target).unwrap().current, 20.0);
-        step(&mut app, 1);
-        assert_eq!(app.world().get::<Health>(target).unwrap().current, 20.0);
-        app.world_mut()
-            .get_mut::<EnergyStore>(attacker)
-            .unwrap()
-            .current = 1;
-        step(&mut app, 1);
-        assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 1);
-        assert_eq!(app.world().get::<Health>(target).unwrap().current, 20.0);
-    }
-
-    #[test]
-    fn empty_minions_seek_pickups_move_out_of_melee_and_resume_on_refill() {
-        let mut app = app();
-        let factions = app.world().resource::<FactionEntities>().0.clone();
-        let minion = fighter(&mut app, factions[0], Vec2::ZERO, 0, 100);
-        fighter(&mut app, factions[1], Vec2::X * 1.5, 0, 101);
-        app.world_mut().spawn((
-            SimulationId(1 << 63),
-            Position(Vec2::X * 4.0),
-            EnergyPickup {
-                available: true,
-                recharge_remaining: 0.0,
-            },
-        ));
-        // Disable default pickups so the expected target is unambiguous.
-        let mut pickups = app.world_mut().query::<(&Position, &mut EnergyPickup)>();
-        for (position, mut pickup) in pickups.iter_mut(app.world_mut()) {
-            pickup.available = position.0 == Vec2::X * 4.0;
-        }
-        step(&mut app, 1);
-        assert_eq!(
-            app.world().get::<Movement>(minion).unwrap().target,
-            Vec2::X * 4.0
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(rebuild_index);
+        schedule.run(app.world_mut());
+        assert!(
+            !app.world()
+                .resource::<SpatialIndex>()
+                .nearby(Vec2::ZERO, 100.0)
+                .any(|entry| entry.entity == trail)
         );
-        assert!(app.world().get::<Position>(minion).unwrap().0.x > 0.0);
-        app.world_mut()
-            .get_mut::<EnergyStore>(minion)
-            .unwrap()
-            .current = 1;
-        step(&mut app, 1);
-        assert_ne!(
-            app.world().get::<Movement>(minion).unwrap().target,
-            Vec2::X * 4.0
-        );
-    }
-
-    #[test]
-    fn empty_minions_reject_stale_supply_roots() {
-        let mut app = app();
-        let factions = app.world().resource::<FactionEntities>().0.clone();
-        let towers: Vec<_> = app
-            .world_mut()
-            .query::<(Entity, &Tower)>()
-            .iter(app.world())
-            .map(|(entity, tower)| (tower.slot, entity))
-            .collect();
-        let own = towers.iter().find(|(slot, _)| *slot == 0).unwrap().1;
-        let enemy = towers.iter().find(|(slot, _)| *slot == 1).unwrap().1;
-        let minion = fighter(&mut app, factions[0], Vec2::ZERO, 0, 100);
-        let supplier = fighter(&mut app, factions[0], Vec2::X * 2.0, 1, 101);
-        app.world_mut()
-            .entity_mut(supplier)
-            .insert(SupplyConnection {
-                root: enemy,
-                parent: enemy,
-            });
-        for mut pickup in app
-            .world_mut()
-            .query::<&mut EnergyPickup>()
-            .iter_mut(app.world_mut())
-        {
-            pickup.available = false;
-        }
-        let mut targets = Schedule::default();
-        targets.add_systems(choose_energy_targets);
-        targets.run(app.world_mut());
-        assert_eq!(
-            app.world().get::<Movement>(minion).unwrap().target,
-            app.world().get::<Position>(own).unwrap().0
-        );
-        app.world_mut()
-            .entity_mut(supplier)
-            .insert(SupplyConnection {
-                root: own,
-                parent: own,
-            });
-        targets.run(app.world_mut());
-        assert_eq!(
-            app.world().get::<Movement>(minion).unwrap().target,
-            Vec2::X * 2.0
-        );
-        app.world_mut().entity_mut(own).despawn();
-        targets.run(app.world_mut());
-        assert_eq!(
-            app.world().get::<Movement>(minion).unwrap().target,
-            Vec2::ZERO
-        );
-    }
-
-    #[test]
-    fn pickup_layout_and_energy_clock_reset_without_duplicate_entities() {
-        fn layout(app: &mut App) -> Vec<(u64, Vec2)> {
-            let mut result: Vec<_> = app
-                .world_mut()
-                .query_filtered::<(&SimulationId, &Position), With<EnergyPickup>>()
-                .iter(app.world())
-                .map(|(id, position)| (id.0, position.0))
-                .collect();
-            result.sort_by_key(|(id, _)| *id);
-            result
-        }
-        let mut app = app();
-        app.add_plugins(crate::energy::EnergyPlugin);
-        let original = layout(&mut app);
-        assert_eq!(original.len(), 30);
-        for (index, (_, position)) in original.iter().enumerate() {
-            assert!(position.abs().max_element() <= 48.0);
-            for (_, other) in &original[..index] {
-                assert!(position.distance(*other) >= 3.0);
-            }
-        }
-        step(&mut app, 200);
-        assert!(app.world().resource::<EnergyClock>().pulses > 0);
-        assert!(count::<Link>(&mut app) > 0);
-        app.world_mut()
-            .resource_mut::<MatchState>()
-            .restart_requested = true;
-        app.world_mut().run_schedule(PreUpdate);
-        assert_eq!(layout(&mut app), original);
-        assert_eq!(app.world().resource::<EnergyClock>().pulses, 0);
-        assert_eq!(app.world().resource::<EnergyClock>().elapsed, 0.0);
-        assert_eq!(count::<Link>(&mut app), 0);
-        assert_eq!(count::<Minion>(&mut app), 0);
-        for pickup in app.world_mut().query::<&EnergyPickup>().iter(app.world()) {
-            assert!(pickup.available);
-        }
     }
 }

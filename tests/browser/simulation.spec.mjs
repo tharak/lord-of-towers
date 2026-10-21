@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('battlefield loads, spawns armies, and spectator controls work', async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
   const errors = [];
   page.on('console', message => { if (message.type() === 'error') console.log('Browser console:', message.text()); });
   page.on('pageerror', error => {
@@ -16,8 +17,11 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await expect(page.locator('#loading')).toBeHidden();
   await expect(page.locator('#error')).toBeHidden();
   await expect(status).toHaveAttribute('data-towers', '5');
-  await expect(status).toHaveAttribute('data-energy-pickups', '30');
-  await expect.poll(async () => Number(await status.getAttribute('data-minions'))).toBeGreaterThan(0);
+  await expect(status).toHaveAttribute('data-raw-deposits', '30');
+  await expect.poll(async () => Number(await status.getAttribute('data-minions'))).toBeGreaterThanOrEqual(15);
+  const initialRaw = Number(await status.getAttribute('data-raw-initial'));
+  expect(initialRaw).toBeGreaterThanOrEqual(150);
+  expect(initialRaw).toBeLessThanOrEqual(300);
   await expect.poll(async () => Number(await status.getAttribute('data-links'))).toBeGreaterThan(0);
   await page.locator('#game').focus();
   await page.keyboard.press('Space');
@@ -43,12 +47,29 @@ test('battlefield loads, spawns armies, and spectator controls work', async ({ p
   await page.mouse.click(75, 900 - 42);
   await expect(status).toHaveAttribute('data-paused', 'false');
   await expect.poll(async () => Number(await status.getAttribute('data-energy-pulses'))).toBeGreaterThan(Number(pulses));
-  await page.screenshot({ path: testInfo.outputPath('energy-links.png') });
+  await expect.poll(async () => Number(await status.getAttribute('data-trails'))).toBeGreaterThan(0);
+  await expect.poll(async () => Number(await status.getAttribute('data-raw-spent')), { timeout: 120_000 }).toBeGreaterThanOrEqual(5);
+  await page.keyboard.press('Space');
+  await expect(status).toHaveAttribute('data-paused', 'true');
+  const raw = await status.evaluate(el => Object.fromEntries(
+    ['remaining', 'carried', 'stock', 'spent', 'initial'].map(key => [key, Number(el.getAttribute(`data-raw-${key}`))])
+  ));
+  expect(raw.remaining + raw.carried + raw.stock + raw.spent).toBe(raw.initial);
+  expect(raw.initial).toBe(initialRaw);
+  const trails = await status.getAttribute('data-trails');
+  await page.waitForTimeout(800);
+  await expect(status).toHaveAttribute('data-trails', trails);
+  await page.screenshot({ path: testInfo.outputPath('gathering-trails.png') });
   await page.keyboard.press('KeyR');
   await expect(status).toHaveAttribute('data-speed', '1');
   await expect(status).toHaveAttribute('data-energy-pulses', '0');
-  await expect(status).toHaveAttribute('data-energy-pickups', '30');
-  await expect(status).toHaveAttribute('data-charged-pickups', '30');
+  await expect(status).toHaveAttribute('data-raw-deposits', '30');
+  await expect(status).toHaveAttribute('data-minions', '15');
+  await expect(status).toHaveAttribute('data-raw-carried', '0');
+  await expect(status).toHaveAttribute('data-raw-stock', '0');
+  await expect(status).toHaveAttribute('data-raw-spent', '0');
+  await expect(status).toHaveAttribute('data-trails', '0');
+  await expect(status).toHaveAttribute('data-raw-remaining', String(initialRaw));
   await expect.poll(async () => Number(await status.getAttribute('data-elapsed'))).toBeLessThan(2);
   await expect(status).toHaveAttribute('data-towers', '5');
   await page.setViewportSize({ width: 1100, height: 700 });

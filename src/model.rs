@@ -167,6 +167,7 @@ pub enum SimSet {
     Spawn,
     Index,
     Target,
+    CombatTarget,
     TrailInput,
     Movement,
     Combat,
@@ -299,3 +300,24 @@ pub struct EnergyClock {
     pub elapsed: f32,
     pub pulses: u64,
 }
+
+/// Target shared by combat steering and firing, refreshed each target tick.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct CombatTarget(pub Entity);
+
+/// Persistent response to a visible attacker that fired at a friendly tower.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct TowerDefenseTarget {
+    pub tower: Entity,
+    pub attacker: Entity,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TowerAlert {
+    pub tower: Entity,
+    pub attacker: Entity,
+}
+
+/// Firing alerts are drained after all attackers fire, before damage resolution.
+#[derive(Resource, Default)]
+pub struct PendingTowerAlerts(pub Vec<TowerAlert>);

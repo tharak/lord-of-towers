@@ -16,6 +16,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<FactionEntities>()
             .init_resource::<SpatialIndex>()
             .init_resource::<PendingDamage>()
+            .init_resource::<PendingTowerAlerts>()
             .init_resource::<SpawnSequence>()
             .insert_resource(RandomStream(42))
             .insert_resource(Time::<Fixed>::from_hz(30.0))
@@ -25,6 +26,7 @@ impl Plugin for SimulationPlugin {
                     SimSet::Spawn,
                     SimSet::Index,
                     SimSet::Target,
+                    SimSet::CombatTarget,
                     SimSet::TrailInput,
                     SimSet::Movement,
                     SimSet::Combat,
@@ -42,6 +44,10 @@ impl Plugin for SimulationPlugin {
             .add_systems(PreUpdate, restart_match)
             .add_systems(FixedUpdate, advance_clock.in_set(SimSet::Spawn))
             .add_systems(FixedUpdate, rebuild_index.in_set(SimSet::Index))
+            .add_systems(
+                FixedUpdate,
+                select_combat_targets.in_set(SimSet::CombatTarget),
+            )
             .add_systems(FixedUpdate, move_minions.in_set(SimSet::Movement))
             .add_systems(
                 FixedUpdate,
@@ -50,6 +56,7 @@ impl Plugin for SimulationPlugin {
                     clear_pending_damage,
                     advance_projectiles,
                     collect_damage,
+                    process_tower_alerts,
                 )
                     .chain()
                     .in_set(SimSet::Combat),
@@ -197,6 +204,7 @@ fn restart_match(
     mut random: ResMut<RandomStream>,
     mut spatial: ResMut<SpatialIndex>,
     mut damage: ResMut<PendingDamage>,
+    mut alerts: ResMut<PendingTowerAlerts>,
     field: Option<ResMut<InfluenceField>>,
     mut sequence: ResMut<SpawnSequence>,
     energy_clock: Option<ResMut<EnergyClock>>,
@@ -214,6 +222,7 @@ fn restart_match(
     };
     spatial.0.clear();
     damage.0.clear();
+    alerts.0.clear();
     sequence.0 = 5;
     if let Some(mut clock) = energy_clock {
         *clock = EnergyClock::default();
@@ -315,12 +324,16 @@ fn rebuild_index(
             &Allegiance,
             Option<&Tower>,
             Option<&SimulationId>,
+            Option<&Health>,
         ),
         Or<(With<Tower>, With<Minion>)>,
     >,
 ) {
     spatial.0.clear();
-    for (entity, position, faction, tower, stable_id) in &units {
+    for (entity, position, faction, tower, stable_id, health) in &units {
+        if health.is_some_and(|health| health.current <= 0.0) {
+            continue;
+        }
         spatial
             .0
             .entry(SpatialIndex::cell(position.0))
@@ -416,12 +429,153 @@ fn advance_projectiles(
     }
 }
 
+/// Combat overrides gathering only for a visible opponent and available attack energy.
+fn select_combat_targets(
+    mut commands: Commands,
+    spatial: Res<SpatialIndex>,
+    config: Res<SimulationConfig>,
+    towers: Query<(&Health, &Allegiance), With<Tower>>,
+    mut minions: Query<
+        (
+            Entity,
+            &Position,
+            &Allegiance,
+            &Vision,
+            &EnergyStore,
+            &Attack,
+            Option<&RawElement>,
+            Option<&TowerDefenseTarget>,
+            Option<&mut Movement>,
+        ),
+        With<Minion>,
+    >,
+) {
+    for (entity, position, owner, vision, energy, attack, cargo, defense, movement) in &mut minions
+    {
+        let visible = |target: Entity| {
+            spatial
+                .nearby(position.0, vision.radius.max(0.0))
+                .find(|entry| entry.entity == target && entry.faction != owner.0)
+        };
+        let defense_target = defense.and_then(|defense| {
+            towers
+                .get(defense.tower)
+                .ok()
+                .filter(|(health, tower_owner)| health.current > 0.0 && *tower_owner == owner)?;
+            visible(defense.attacker)
+        });
+        if defense.is_some() && defense_target.is_none() {
+            commands.entity(entity).remove::<TowerDefenseTarget>();
+        }
+        if energy.current < config.attack_energy_cost {
+            commands.entity(entity).remove::<CombatTarget>();
+            continue;
+        }
+        let carrying = cargo.is_some_and(|cargo| cargo.0 > 0);
+        let target = defense_target.or_else(|| {
+            spatial
+                .nearby(position.0, vision.radius.max(0.0))
+                .filter(|entry| entry.faction != owner.0)
+                .filter(|entry| {
+                    !carrying
+                        || position.0.distance(entry.position)
+                            <= attack.range + if entry.tower { 2.0 } else { 0.0 }
+                })
+                .min_by(|a, b| {
+                    position
+                        .0
+                        .distance_squared(a.position)
+                        .total_cmp(&position.0.distance_squared(b.position))
+                        .then(a.stable_id.cmp(&b.stable_id))
+                })
+        });
+        if let Some(target) = target {
+            commands.entity(entity).insert(CombatTarget(target.entity));
+            if (!carrying || defense_target.is_some())
+                && let Some(mut movement) = movement
+            {
+                let offset = target.position - position.0;
+                let range = attack.range + if target.tower { 2.0 } else { 0.0 };
+                movement.target =
+                    target.position - offset.normalize_or_zero() * range.min(offset.length());
+                movement.retarget_in = 0.0;
+            }
+        } else {
+            commands.entity(entity).remove::<CombatTarget>();
+        }
+    }
+}
+
+fn process_tower_alerts(
+    mut commands: Commands,
+    mut alerts: ResMut<PendingTowerAlerts>,
+    towers: Query<(&Position, &Allegiance, &InfluenceEmitter, &Health), With<Tower>>,
+    targets: Query<
+        (&Position, &Allegiance, &Health, Option<&SimulationId>),
+        Or<(With<Minion>, With<Tower>)>,
+    >,
+    minions: Query<
+        (
+            Entity,
+            &Position,
+            &Allegiance,
+            &Vision,
+            Option<&TowerDefenseTarget>,
+        ),
+        With<Minion>,
+    >,
+) {
+    let alerts = std::mem::take(&mut alerts.0);
+    for (entity, position, owner, vision, current) in &minions {
+        let valid = |defense: TowerDefenseTarget| {
+            let (_, tower_owner, _, tower_health) = towers.get(defense.tower).ok()?;
+            let (attacker_position, attacker_owner, health, id) =
+                targets.get(defense.attacker).ok()?;
+            let distance = position.0.distance_squared(attacker_position.0);
+            (tower_owner == owner
+                && tower_health.current > 0.0
+                && attacker_owner != owner
+                && health.current > 0.0
+                && distance <= vision.radius.max(0.0).powi(2))
+            .then_some((
+                defense,
+                distance,
+                id.map_or(defense.attacker.to_bits(), |id| id.0),
+            ))
+        };
+        let best = current
+            .copied()
+            .and_then(valid)
+            .into_iter()
+            .chain(alerts.iter().filter_map(|alert| {
+                let (tower_position, tower_owner, influence, _) = towers.get(alert.tower).ok()?;
+                if tower_owner != owner
+                    || position.0.distance_squared(tower_position.0)
+                        > influence.radius.max(0.0).powi(2)
+                {
+                    return None;
+                }
+                valid(TowerDefenseTarget {
+                    tower: alert.tower,
+                    attacker: alert.attacker,
+                })
+            }))
+            .min_by(|a, b| a.1.total_cmp(&b.1).then(a.2.cmp(&b.2)));
+        if let Some((defense, _, _)) = best {
+            commands.entity(entity).insert(defense);
+        } else if current.is_some() {
+            commands.entity(entity).remove::<TowerDefenseTarget>();
+        }
+    }
+}
+
 fn collect_damage(
     mut commands: Commands,
     time: Res<Time<Fixed>>,
     state: Res<MatchState>,
     spatial: Res<SpatialIndex>,
     factions: Query<&Faction>,
+    live_targets: Query<(&Position, &Allegiance, Option<&Health>), Or<(With<Tower>, With<Minion>)>>,
     mut attackers: Query<
         (
             Entity,
@@ -430,13 +584,15 @@ fn collect_damage(
             &mut Attack,
             &mut EnergyStore,
             &Vision,
+            Option<&CombatTarget>,
         ),
         With<Minion>,
     >,
+    mut alerts: ResMut<PendingTowerAlerts>,
     config: Res<SimulationConfig>,
 ) {
     let dt = simulation_delta(&time, &state);
-    for (entity, position, faction, mut attack, mut energy, vision) in &mut attackers {
+    for (entity, position, faction, mut attack, mut energy, vision, selected) in &mut attackers {
         attack.remaining = (attack.remaining - dt).max(0.0);
         if attack.remaining > 0.0 || energy.current < config.attack_energy_cost {
             continue;
@@ -447,26 +603,34 @@ fn collect_damage(
         else {
             continue;
         };
-        let target = spatial
-            .nearby(position.0, attack.range + 2.0)
-            .filter(|entry| {
-                entry.faction != faction.0
-                    && position.0.distance_squared(entry.position) <= vision.radius.max(0.0).powi(2)
-                    && position.0.distance(entry.position)
-                        <= attack.range + if entry.tower { 2.0 } else { 0.0 }
-            })
-            .min_by(|a, b| {
-                a.tower
-                    .cmp(&b.tower)
-                    .then_with(|| {
-                        position
-                            .0
-                            .distance_squared(a.position)
-                            .total_cmp(&position.0.distance_squared(b.position))
-                    })
-                    .then(a.stable_id.cmp(&b.stable_id))
-            });
+        let target = selected.and_then(|selected| {
+            spatial
+                .nearby(position.0, vision.radius.max(0.0))
+                .find(|entry| {
+                    entry.entity == selected.0
+                        && entry.faction != faction.0
+                        && position.0.distance(entry.position)
+                            <= attack.range + if entry.tower { 2.0 } else { 0.0 }
+                })
+        });
         if let Some(target) = target {
+            let Ok((live_position, live_owner, health)) = live_targets.get(target.entity) else {
+                continue;
+            };
+            let distance = position.0.distance(live_position.0);
+            if live_owner.0 == faction.0
+                || health.is_some_and(|health| health.current <= 0.0)
+                || distance > vision.radius.max(0.0)
+                || distance > attack.range + if target.tower { 2.0 } else { 0.0 }
+            {
+                continue;
+            }
+            if target.tower {
+                alerts.0.push(TowerAlert {
+                    tower: target.entity,
+                    attacker: entity,
+                });
+            }
             commands.spawn((
                 Name::new("Energy projectile"),
                 EntityKind::EnergyProjectile,
@@ -777,7 +941,7 @@ mod tests {
     }
 
     #[test]
-    fn combat_prioritizes_eligible_minions_then_distance_and_stable_id() {
+    fn combat_selects_closest_visible_enemy_then_stable_id() {
         let mut app = app();
         let factions = app.world().resource::<FactionEntities>().0.clone();
         let center = Vec2::splat(1000.0);
@@ -804,7 +968,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Tower { slot: 99 },
-                Position(center + Vec2::X * 0.25),
+                Position(center + Vec2::X * 2.5),
                 Allegiance(factions[1]),
                 SimulationId(100),
             ))
@@ -838,7 +1002,7 @@ mod tests {
             ))
             .id();
         let mut combat = Schedule::default();
-        combat.add_systems((rebuild_index, collect_damage).chain());
+        combat.add_systems((rebuild_index, select_combat_targets, collect_damage).chain());
         combat.run(app.world_mut());
         let shots: Vec<_> = app
             .world_mut()
@@ -863,7 +1027,7 @@ mod tests {
 
         // A visible minion outside attack range must not prevent tower fallback.
         for minion in [preferred, farther, tied] {
-            app.world_mut().get_mut::<Position>(minion).unwrap().0 = center + Vec2::X * 2.0;
+            app.world_mut().get_mut::<Position>(minion).unwrap().0 = center + Vec2::X * 3.0;
         }
         app.world_mut()
             .get_mut::<Attack>(attacker)
@@ -879,7 +1043,10 @@ mod tests {
         assert_eq!(count::<EnergyProjectile>(&mut app), 2);
         assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 3);
 
-        // Without an eligible target, neither energy nor cooldown is spent.
+        // Without a visible target, neither energy nor cooldown is spent.
+        for minion in [preferred, farther, tied] {
+            app.world_mut().get_mut::<Position>(minion).unwrap().0 = center + Vec2::X * 4.0;
+        }
         app.world_mut().get_mut::<Position>(tower).unwrap().0 = center + Vec2::X * 4.0;
         app.world_mut()
             .get_mut::<Attack>(attacker)
@@ -934,7 +1101,7 @@ mod tests {
             .spawn((Minion, Position(center + Vec2::X), Allegiance(factions[1])))
             .id();
         let mut combat = Schedule::default();
-        combat.add_systems((rebuild_index, collect_damage).chain());
+        combat.add_systems((rebuild_index, select_combat_targets, collect_damage).chain());
         combat.run(app.world_mut());
         assert!(
             !app.world()
@@ -967,6 +1134,7 @@ mod tests {
                     cooldown: 0.8,
                     remaining: 0.0,
                 },
+                RawElement(1),
                 Movement {
                     speed: 4.0,
                     target: Vec2::Y * 10.0,
@@ -979,7 +1147,7 @@ mod tests {
             .spawn((Minion, Position(Vec2::X * 1.01), Allegiance(factions[1])))
             .id();
         let mut combat = Schedule::default();
-        combat.add_systems((rebuild_index, collect_damage).chain());
+        combat.add_systems((rebuild_index, select_combat_targets, collect_damage).chain());
         combat.run(app.world_mut());
         assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 5);
         app.world_mut().get_mut::<Position>(target).unwrap().0 = Vec2::X;
@@ -1009,6 +1177,404 @@ mod tests {
             app.world().get::<Movement>(attacker).unwrap().target,
             Vec2::Y * 10.0
         );
+    }
+
+    #[test]
+    fn defense_alerts_use_influence_vision_and_deterministic_closest_attacker() {
+        let mut app = app();
+        let owners = app.world().resource::<FactionEntities>().0.clone();
+        let center = Vec2::splat(1000.0);
+        let tower = app
+            .world_mut()
+            .spawn((
+                Tower { slot: 99 },
+                Position(center),
+                Allegiance(owners[0]),
+                InfluenceEmitter {
+                    radius: 5.0,
+                    strength: 1.0,
+                },
+                Health {
+                    current: 100.0,
+                    max: 100.0,
+                },
+            ))
+            .id();
+        let spawn_enemy = |app: &mut App, x: f32, id: u64| {
+            app.world_mut()
+                .spawn((
+                    Minion,
+                    Position(center + Vec2::X * x),
+                    Allegiance(owners[1]),
+                    SimulationId(id),
+                    Health {
+                        current: 30.0,
+                        max: 30.0,
+                    },
+                ))
+                .id()
+        };
+        let farther = spawn_enemy(&mut app, 8.0, 50);
+        let tied = spawn_enemy(&mut app, -6.0, 52);
+        let preferred = spawn_enemy(&mut app, 6.0, 51);
+        let spawn_defender = |app: &mut App, x: f32, vision: f32| {
+            app.world_mut()
+                .spawn((
+                    Minion,
+                    Position(center + Vec2::X * x),
+                    Allegiance(owners[0]),
+                    Vision { radius: vision },
+                    RawElement(1),
+                    EnergyStore {
+                        current: 5,
+                        capacity: 5,
+                    },
+                    Attack {
+                        damage: 10.0,
+                        range: 2.0,
+                        cooldown: 1.0,
+                        remaining: 0.0,
+                    },
+                    Movement {
+                        speed: 4.0,
+                        target: center - Vec2::Y * 10.0,
+                        retarget_in: 0.0,
+                    },
+                ))
+                .id()
+        };
+        let defender = spawn_defender(&mut app, 0.0, 10.0);
+        let outside = spawn_defender(&mut app, 5.1, 20.0);
+        let blind = spawn_defender(&mut app, 0.0, 2.0);
+        app.world_mut()
+            .resource_mut::<PendingTowerAlerts>()
+            .0
+            .extend([farther, tied, preferred].map(|attacker| TowerAlert { tower, attacker }));
+        let mut alerts = Schedule::default();
+        alerts.add_systems(process_tower_alerts);
+        alerts.run(app.world_mut());
+        assert_eq!(
+            app.world()
+                .get::<TowerDefenseTarget>(defender)
+                .unwrap()
+                .attacker,
+            preferred
+        );
+        assert!(app.world().get::<TowerDefenseTarget>(outside).is_none());
+        assert!(app.world().get::<TowerDefenseTarget>(blind).is_none());
+        assert!(app.world().resource::<PendingTowerAlerts>().0.is_empty());
+        let mut select = Schedule::default();
+        select.add_systems((rebuild_index, select_combat_targets).chain());
+        select.run(app.world_mut());
+        assert_eq!(
+            app.world().get::<CombatTarget>(defender).unwrap().0,
+            preferred
+        );
+        assert_eq!(
+            app.world().get::<Movement>(defender).unwrap().target,
+            center + Vec2::X * 4.0
+        );
+        assert_eq!(app.world().get::<RawElement>(defender).unwrap().0, 1);
+        // A valid current alert competes with later alerts using the same ordering.
+        app.world_mut()
+            .resource_mut::<PendingTowerAlerts>()
+            .0
+            .push(TowerAlert {
+                tower,
+                attacker: farther,
+            });
+        alerts.run(app.world_mut());
+        assert_eq!(
+            app.world()
+                .get::<TowerDefenseTarget>(defender)
+                .unwrap()
+                .attacker,
+            preferred
+        );
+        // Leaving vision cancels defense. Cargo then prevents chasing any visible enemy.
+        app.world_mut().get_mut::<Position>(preferred).unwrap().0 = center + Vec2::X * 11.0;
+        select.run(app.world_mut());
+        assert!(app.world().get::<TowerDefenseTarget>(defender).is_none());
+        assert!(app.world().get::<CombatTarget>(defender).is_none());
+        assert_eq!(app.world().get::<RawElement>(defender).unwrap().0, 1);
+        // Empty minions pursue; zero energy suspends pursuit until refilled.
+        app.world_mut().get_mut::<RawElement>(defender).unwrap().0 = 0;
+        select.run(app.world_mut());
+        assert_eq!(app.world().get::<CombatTarget>(defender).unwrap().0, tied);
+        app.world_mut()
+            .get_mut::<EnergyStore>(defender)
+            .unwrap()
+            .current = 0;
+        select.run(app.world_mut());
+        assert!(app.world().get::<CombatTarget>(defender).is_none());
+        app.world_mut()
+            .get_mut::<EnergyStore>(defender)
+            .unwrap()
+            .current = 1;
+        select.run(app.world_mut());
+        assert_eq!(app.world().get::<CombatTarget>(defender).unwrap().0, tied);
+    }
+
+    #[test]
+    fn firing_revalidates_shared_target_without_spending_energy() {
+        let mut app = app();
+        let owners = app.world().resource::<FactionEntities>().0.clone();
+        let center = Vec2::splat(1000.0);
+        let target = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center + Vec2::X),
+                Allegiance(owners[1]),
+                Health {
+                    current: 30.0,
+                    max: 30.0,
+                },
+            ))
+            .id();
+        let attacker = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center),
+                Allegiance(owners[0]),
+                Vision { radius: 10.0 },
+                EnergyStore {
+                    current: 5,
+                    capacity: 5,
+                },
+                Attack {
+                    damage: 10.0,
+                    range: 2.0,
+                    cooldown: 1.0,
+                    remaining: 0.0,
+                },
+            ))
+            .id();
+        let mut select = Schedule::default();
+        select.add_systems((rebuild_index, select_combat_targets).chain());
+        let mut fire = Schedule::default();
+        fire.add_systems(collect_damage);
+        for mode in 0..4 {
+            app.world_mut().entity_mut(target).insert((
+                Allegiance(owners[1]),
+                Position(center + Vec2::X),
+                Health {
+                    current: 30.0,
+                    max: 30.0,
+                },
+            ));
+            select.run(app.world_mut());
+            assert_eq!(app.world().get::<CombatTarget>(attacker).unwrap().0, target);
+            match mode {
+                0 => app.world_mut().get_mut::<Allegiance>(target).unwrap().0 = owners[0],
+                1 => app.world_mut().get_mut::<Health>(target).unwrap().current = 0.0,
+                2 => {
+                    app.world_mut().get_mut::<Position>(target).unwrap().0 = center + Vec2::X * 11.0
+                }
+                _ => {
+                    app.world_mut().despawn(target);
+                }
+            }
+            fire.run(app.world_mut());
+            assert_eq!(app.world().get::<EnergyStore>(attacker).unwrap().current, 5);
+            assert_eq!(app.world().get::<Attack>(attacker).unwrap().remaining, 0.0);
+            assert_eq!(count::<EnergyProjectile>(&mut app), 0);
+        }
+    }
+
+    #[test]
+    fn fixed_schedule_applies_combat_cargo_and_defense_priorities() {
+        let mut app = app();
+        let owners = app.world().resource::<FactionEntities>().0.clone();
+        let old: Vec<_> = app
+            .world_mut()
+            .query_filtered::<Entity, Or<(With<Minion>, With<RawElementDeposit>)>>()
+            .iter(app.world())
+            .collect();
+        for entity in old {
+            app.world_mut().despawn(entity);
+        }
+        let tower = app
+            .world_mut()
+            .spawn((
+                Tower { slot: 99 },
+                Position(Vec2::X * -20.0),
+                Allegiance(owners[0]),
+                RawElement(0),
+                InfluenceEmitter {
+                    radius: 30.0,
+                    strength: 1.0,
+                },
+                Health {
+                    current: 100.0,
+                    max: 100.0,
+                },
+            ))
+            .id();
+        let enemy = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(Vec2::X * 10.0),
+                Allegiance(owners[1]),
+                Health {
+                    current: 30.0,
+                    max: 30.0,
+                },
+            ))
+            .id();
+        app.world_mut().spawn((
+            RawElementDeposit,
+            Position(Vec2::Y * 10.0),
+            RawElement(1),
+            SimulationId(500),
+        ));
+        app.world_mut().spawn((
+            Trail {
+                trip: 9,
+                sequence: 0,
+                remaining: 30.0,
+            },
+            Position(Vec2::Y * 5.0),
+            Allegiance(owners[0]),
+        ));
+        let minion = app
+            .world_mut()
+            .spawn((
+                Minion,
+                SimulationId(501),
+                Position(Vec2::ZERO),
+                Allegiance(owners[0]),
+                Vision { radius: 20.0 },
+                RawElement(0),
+                GatheringState::Exploring,
+                EnergyStore {
+                    current: 5,
+                    capacity: 5,
+                },
+                Attack {
+                    damage: 10.0,
+                    range: 2.0,
+                    cooldown: 1.0,
+                    remaining: 0.0,
+                },
+                Movement {
+                    speed: 0.0,
+                    target: Vec2::ZERO,
+                    retarget_in: 0.0,
+                },
+            ))
+            .id();
+        step(&mut app, 1);
+        assert_eq!(
+            app.world().get::<Movement>(minion).unwrap().target,
+            Vec2::X * 8.0
+        );
+        app.world_mut().get_mut::<RawElement>(minion).unwrap().0 = 1;
+        app.world_mut()
+            .entity_mut(minion)
+            .insert(GatheringState::Returning { tower: Some(tower) });
+        step(&mut app, 1);
+        assert_eq!(
+            app.world().get::<Movement>(minion).unwrap().target,
+            Vec2::X * -20.0
+        );
+        assert!(app.world().get::<CombatTarget>(minion).is_none());
+        app.world_mut()
+            .entity_mut(minion)
+            .insert(TowerDefenseTarget {
+                tower,
+                attacker: enemy,
+            });
+        step(&mut app, 1);
+        assert_eq!(
+            app.world().get::<Movement>(minion).unwrap().target,
+            Vec2::X * 8.0
+        );
+        assert_eq!(app.world().get::<RawElement>(minion).unwrap().0, 1);
+        app.world_mut()
+            .get_mut::<EnergyStore>(minion)
+            .unwrap()
+            .current = 0;
+        step(&mut app, 1);
+        assert_eq!(
+            app.world().get::<Movement>(minion).unwrap().target,
+            Vec2::X * -20.0
+        );
+    }
+
+    #[test]
+    fn firing_at_tower_alerts_defenders_before_projectile_impact() {
+        let mut app = app();
+        let owners = app.world().resource::<FactionEntities>().0.clone();
+        let center = Vec2::splat(1000.0);
+        let tower = app
+            .world_mut()
+            .spawn((
+                Tower { slot: 99 },
+                Position(center),
+                Allegiance(owners[0]),
+                InfluenceEmitter {
+                    radius: 10.0,
+                    strength: 1.0,
+                },
+                Health {
+                    current: 100.0,
+                    max: 100.0,
+                },
+            ))
+            .id();
+        let defender = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center - Vec2::X),
+                Allegiance(owners[0]),
+                Vision { radius: 10.0 },
+            ))
+            .id();
+        let attacker = app
+            .world_mut()
+            .spawn((
+                Minion,
+                Position(center + Vec2::X * 3.0),
+                Allegiance(owners[1]),
+                Vision { radius: 10.0 },
+                EnergyStore {
+                    current: 5,
+                    capacity: 5,
+                },
+                Attack {
+                    damage: 10.0,
+                    range: 2.0,
+                    cooldown: 1.0,
+                    remaining: 0.0,
+                },
+            ))
+            .id();
+        let mut combat = Schedule::default();
+        combat.add_systems(
+            (
+                rebuild_index,
+                select_combat_targets,
+                collect_damage,
+                process_tower_alerts,
+            )
+                .chain(),
+        );
+        combat.run(app.world_mut());
+        assert_eq!(app.world().get::<CombatTarget>(attacker).unwrap().0, tower);
+        assert_eq!(
+            app.world()
+                .get::<TowerDefenseTarget>(defender)
+                .unwrap()
+                .attacker,
+            attacker
+        );
+        assert_eq!(app.world().get::<Health>(tower).unwrap().current, 100.0);
+        assert!(app.world().resource::<PendingDamage>().0.is_empty());
+        assert_eq!(count::<EnergyProjectile>(&mut app), 1);
     }
 
     #[test]
@@ -1074,6 +1640,13 @@ mod tests {
         let old = app.world().resource::<FactionEntities>().0.clone();
         step(&mut app, 200);
         app.world_mut()
+            .resource_mut::<PendingTowerAlerts>()
+            .0
+            .push(TowerAlert {
+                tower: old[0],
+                attacker: old[1],
+            });
+        app.world_mut()
             .resource_mut::<MatchState>()
             .restart_requested = true;
         app.world_mut().run_schedule(PreUpdate);
@@ -1081,6 +1654,7 @@ mod tests {
         assert_eq!(count::<Minion>(&mut app), 15);
         assert_eq!(count::<Tower>(&mut app), 5);
         assert_eq!(count::<Trail>(&mut app), 0);
+        assert!(app.world().resource::<PendingTowerAlerts>().0.is_empty());
         assert_eq!(app.world().resource::<MatchState>().elapsed, 0.0);
         assert_eq!(app.world().resource::<EnergyClock>().pulses, 0);
         assert_eq!(app.world().resource::<EnergyClock>().elapsed, 0.0);

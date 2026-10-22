@@ -253,7 +253,7 @@ fn append_gameplay_details(text: &mut String, entity: &EntityRef) {
     if let Some(stats) = entity.get::<ElementStats>() {
         let _ = writeln!(
             text,
-            "Permanent birth stats: Fire {} Water {} Earth {} Air {} Void {}",
+            "Birth recipe points (do not scale equipment): Fire {} Water {} Earth {} Air {} Void {}",
             stats.fire, stats.water, stats.earth, stats.air, stats.void
         );
     }

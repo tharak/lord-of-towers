@@ -284,20 +284,6 @@ impl ElementStats {
         }
         stats
     }
-    pub fn equipped_multiplier(&self, element: Element, gear: &EquippedElements) -> f32 {
-        let counts = gear.counts();
-        let level = match element {
-            Element::Fire => self.fire,
-            Element::Water => self.water,
-            Element::Earth => self.earth,
-            Element::Air => self.air,
-            Element::Void => return 1.0,
-        };
-        1.0 + 0.10
-            * level as f32
-            * counts[element as usize] as f32
-            * (1.0 + 0.10 * self.void as f32 * counts[Element::Void as usize] as f32)
-    }
 }
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Vision {
@@ -389,7 +375,20 @@ pub struct PendingTowerAlerts(pub Vec<TowerAlert>);
 pub struct EquippedElements {
     pub slots: [Option<Element>; 3],
 }
+pub const ELEMENT_BONUS_PERCENT: f32 = 30.0;
+pub const VOID_BONUS_PERCENT: f32 = 10.0;
 impl EquippedElements {
+    /// Fixed equipment bonuses; birth-recipe points do not change these rates.
+    pub fn multiplier(&self, element: Element) -> f32 {
+        if element == Element::Void {
+            return 1.0;
+        }
+        let counts = self.counts();
+        1.0 + (ELEMENT_BONUS_PERCENT / 100.0)
+            * counts[element as usize] as f32
+            * (1.0 + (VOID_BONUS_PERCENT / 100.0) * counts[Element::Void as usize] as f32)
+    }
+
     pub fn counts(&self) -> [u32; 5] {
         let mut counts = [0; 5];
         for element in self.slots.iter().flatten() {

@@ -7,7 +7,7 @@
 | donut | Visible stock, cargo or deposit unit. | `DonutVisual` / stack child |
 | torus | Bevy primitive mesh used to render a donut. Not a resource type. | `Torus` |
 | cargo | Gathered overflow element or unequipped units being carried home. | Minion `ElementInventory` |
-| equipment | Up to three individually slotted elements, duplicates allowed; activates birth-stat bonuses. | `EquippedElements` |
+| equipment | Up to three individually slotted elements, duplicates allowed; each grants 30% of its base attribute, with 10% bonus amplification per Void. | `EquippedElements` |
 | equipment sphere | Colored visual for one equipped slot; separate from cargo crown. | `EquippedElementVisual` / sphere |
 | elemental stat | Permanent numeric birth point, initially two each plus recipe counts; not an inventory unit. | `ElementStats` |
 | reservation | Element removed immediately from tower stock for a pending exchange. | Order `ElementInventory` |

@@ -4,7 +4,7 @@
 
 ## Derived attributes
 
-Fire modifies damage, water movement speed, earth maximum health and air vision. Each attribute uses `base × [1 + .10 × matching_stat × matching_equipped_copies × (1 + .10 × void_stat × equipped_void_copies)]`. Void alone grants no direct bonus. Base values are damage 10, speed 4, health 30 and vision 15. Birth stats start at two per element plus counts of the five consumed recipe units. Changing equipment preserves current/max health ratio.
+Fire modifies damage, water movement speed, earth maximum health and air vision. Each attribute uses `base × [1 + .30 × matching_equipped_copies × (1 + .10 × equipped_void_copies)]`. Void alone grants no direct bonus. Base values are damage 10, speed 4, health 30 and vision 15. Birth stats start at two per element plus counts of the five consumed recipe units. Changing equipment preserves current/max health ratio.
 
 ## Orders and reservations
 
@@ -23,3 +23,5 @@ The player selects units through one row of five element buttons matching the mi
 For each type: deposits + cargo + stock + equipped + reserved + consumed = initial. Visual children store no resources. Compilation is the only validation; no tests or runtime checks are added.
 
 The minion panel is exactly three rows of five element buttons. Stock availability enables each type in all rows; the equipped type is outlined and can always be returned to a living friendly tower, even if its stock is zero. No slot selector, status, delivery or cancellation rows are shown. The tower uses one matching row; five selected units automatically submit the birth and reset selection.
+
+Equipment percentages are fixed: Fire +30% base damage, Water +30% base speed, Earth +30% base maximum health, Air +30% base vision, per equipped copy. Void increases these bonuses by 10% per equipped copy. Birth recipe points remain metadata and do not change these rates. One Fire gives 13 damage; Fire + Void gives 13.3; three Fire gives 19. Bases remain 10 damage, 4 units/s, 30 health and 15 vision.

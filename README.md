@@ -22,11 +22,11 @@ Two fingers pan and pinch to zoom. WASD/arrow keys pan and +/− zoom. Space pau
 
 Thirty seeded deposits contain 5–10 units each, six deposits per element: **fire, water, earth, air and void**. Each deposit is homogeneous and never recharges. A minion carries one unit to a friendly tower. Tower stock appears as five separate vertical donut stacks, one per element, above the beacon. Each donut represents one unit. Minion crowns show carried cargo. Up to three orbiting spheres show equipped units in their element colors. Projectiles and unit bodies retain faction colors.
 
-Every minion has permanent elemental stats starting at **2** each. Five consumed recipe units add matching points only to that newborn. Equipment activates the corresponding bonus: fire damage, water speed, earth maximum health and air vision. Void equipment amplifies these bonuses. For each attribute:
+Every minion has permanent elemental stats starting at **2** each. Five consumed recipe units add matching points only to that newborn. Each equipped non-Void unit grants a fixed 30% bonus to its base attribute: fire damage, water speed, earth maximum health and air vision. Each equipped Void amplifies these bonuses by 10%. For each attribute:
 
-`base × [1 + 0.10 × matching_stat × equipped_copies × (1 + 0.10 × void_stat × equipped_void_copies)]`
+`base × [1 + 0.30 × equipped_copies × (1 + 0.10 × equipped_void_copies)]`
 
-Starting and newborn minions have empty slots: damage **10**, speed **4**, maximum health **30**, vision **15**. Void alone gives no bonus. Equipment changes preserve health percentage. Birth stats are separate from physical cargo and equipment.
+Starting and newborn minions have empty slots: damage **10**, speed **4**, maximum health **30**, vision **15**. Void alone gives no bonus. Equipment changes preserve health percentage. Birth recipe points are retained as metadata and no longer scale equipment bonuses.
 
 Minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Only friendly delivery tower locations are globally known; there is no shared faction vision.
 

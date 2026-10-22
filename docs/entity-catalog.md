@@ -30,10 +30,12 @@ The five bottom controls are pause/play, 1×, 2×, 4× and restart. `HudRoot`, `
 
 ## Shared state and rules
 
-`EquippedElements.slots` contains up to three physical units, duplicates allowed. Cargo remains independent. Permanent `ElementStats` starts at two each; a birth consumes five selected/FIFO units and adds matching points only to its newborn. Fire damage, water speed, earth max health and air vision use `base × [1 + .10 × matching_stat × equipped_copies × (1 + .10 × void_stat × equipped_void_copies)]`. Void alone grants no bonus. Empty gear gives damage 10, speed 4, health 30 and vision 15. Equipment changes preserve health percentage.
+`EquippedElements.slots` contains up to three physical units, duplicates allowed. Cargo remains independent. Permanent `ElementStats` starts at two each; a birth consumes five selected/FIFO units and adds matching points only to its newborn. Fire damage, water speed, earth max health and air vision use `base × [1 + .30 × equipped_copies × (1 + .10 × equipped_void_copies)]`. Void alone grants no bonus. Empty gear gives damage 10, speed 4, health 30 and vision 15. Equipment changes preserve health percentage.
 
 `ElementEconomy` tracks initial and consumed counts per type. Deposits + cargo + tower stock + equipped + reserved + consumed equals initial. Visual entities hold no resources. `PlayerCommands` queues validated orders/recipes; `PlayerSelection` stores selected entity, slot and recipe. `TrailIds` allocates carrier trips; per-minion visited memory is pruned as markers disappear.
 
 `CombatTarget` shares movement/shooting target. `TowerDefenseTarget` references a visible attacker and living friendly tower. `PendingTowerAlerts` collects tower shots and resolves recipients inside tower influence with attacker in vision. Defense overrides return orders; otherwise carriers/ordered minions shoot only in-range enemies without pursuing.
 
 `InfluenceField` is bounded 101×101 territory sampling at 10 Hz simulation time. It is not an entity registry and grants no recharge. See [equipment contracts](equipment-contracts.md), [gathering contracts](gathering-contracts.md) and the [wiki](https://github.com/tharak/lord-of-towers/wiki).
+
+Equipment percentages are fixed: Fire +30% base damage, Water +30% base speed, Earth +30% base maximum health, Air +30% base vision, per equipped copy. Void increases these bonuses by 10% per equipped copy. Birth recipe points remain metadata and do not change these rates. One Fire gives 13 damage; Fire + Void gives 13.3; three Fire gives 19. Bases remain 10 damage, 4 units/s, 30 health and 15 vision.

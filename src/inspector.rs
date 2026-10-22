@@ -1,8 +1,5 @@
 //! A bounded view into the live ECS world, never an entity registry.
-use crate::model::{
-    Allegiance, Attack, ElementInventory, ElementStats, EnergyStore, EntityKind, FACTION_NAMES,
-    Faction, GatheringState, Health, InfluenceEmitter, Movement, PlayerDrawnTrail, Trail, Vision,
-};
+use crate::model::*;
 use bevy::prelude::*;
 use std::fmt::Write;
 
@@ -42,18 +39,20 @@ enum InspectorAction {
     Components,
     Close,
 }
-const KINDS: [EntityKind; 15] = [
+const KINDS: [EntityKind; 17] = [
     EntityKind::Faction,
     EntityKind::Tower,
     EntityKind::Minion,
     EntityKind::ElementDeposit,
     EntityKind::Trail,
     EntityKind::DonutVisual,
-    EntityKind::EnergyOrbVisual,
-    EntityKind::EnergyProjectile,
+    EntityKind::EquippedElementVisual,
+    EntityKind::Projectile,
     EntityKind::StackVisual,
     EntityKind::TowerBeacon,
     EntityKind::TowerInfluenceVisual,
+    EntityKind::EquipmentOrder,
+    EntityKind::ProductionIndicator,
     EntityKind::Battlefield,
     EntityKind::Camera,
     EntityKind::Light,
@@ -237,10 +236,7 @@ fn short_type_name(name: &str) -> String {
     result.trim_end().to_owned()
 }
 
-fn append_energy_details(text: &mut String, entity: &EntityRef) {
-    if let Some(store) = entity.get::<EnergyStore>() {
-        let _ = writeln!(text, "Energy: {}/{}", store.current, store.capacity);
-    }
+fn append_gameplay_details(text: &mut String, entity: &EntityRef) {
     if let Some(inventory) = entity.get::<ElementInventory>() {
         let counts = inventory.counts();
         let _ = writeln!(
@@ -257,7 +253,7 @@ fn append_energy_details(text: &mut String, entity: &EntityRef) {
     if let Some(stats) = entity.get::<ElementStats>() {
         let _ = writeln!(
             text,
-            "Element stats: Fire {} Water {} Earth {} Air {} Void {}",
+            "Permanent birth stats: Fire {} Water {} Earth {} Air {} Void {}",
             stats.fire, stats.water, stats.earth, stats.air, stats.void
         );
     }
@@ -288,10 +284,42 @@ fn append_energy_details(text: &mut String, entity: &EntityRef) {
         );
     }
     if let Some(emitter) = entity.get::<InfluenceEmitter>() {
-        let _ = writeln!(text, "Recharge radius: {:.1}", emitter.radius);
+        let _ = writeln!(text, "Influence radius: {:.1}", emitter.radius);
     }
-    if let Some(drawn) = entity.get::<PlayerDrawnTrail>() {
-        let _ = writeln!(text, "Player drawn trail: {}", drawn.serial);
+    if let Some(gear) = entity.get::<EquippedElements>() {
+        for (slot, element) in gear.slots.iter().enumerate() {
+            let _ = writeln!(
+                text,
+                "Equipment slot {}: {}",
+                slot + 1,
+                element.map_or("Empty", Element::name)
+            );
+        }
+    }
+    if let Some(order) = entity.get::<EquipmentOrder>() {
+        let _ = writeln!(
+            text,
+            "Equipment order: {:?} | tower {:?} | source position ({:.1}, {:.1}) | recipient minion {:?}",
+            order.action,
+            order.tower,
+            order.source_position.x,
+            order.source_position.y,
+            order.minion
+        );
+        let _ = writeln!(
+            text,
+            "Reserved units: {}",
+            entity
+                .get::<ElementInventory>()
+                .map_or(0, ElementInventory::total)
+        );
+    }
+    if let Some(projectile) = entity.get::<Projectile>() {
+        let _ = writeln!(
+            text,
+            "Projectile: target {:?} | {:.1} damage | {:.1} speed | {:.1}s remaining",
+            projectile.target, projectile.damage, projectile.speed, projectile.remaining
+        );
     }
 }
 
@@ -375,7 +403,7 @@ fn refresh(world: &mut World) {
             entity.get::<EntityKind>(),
             faction.map_or("None", |f| FACTION_NAMES[f.index])
         );
-        append_energy_details(&mut text, &entity);
+        append_gameplay_details(&mut text, &entity);
         let mut components: Vec<_> = entity
             .archetype()
             .components()

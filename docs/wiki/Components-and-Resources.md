@@ -22,7 +22,7 @@
 | `Trail`, private `VisitedTrailMarkers` | Thirty-second breadcrumb and per-minion visited identities. Selection marks all other visible friendly markers visited; arrival marks selected marker. |
 | `InfluenceEmitter` | Fixed radius/strength for territory and tower alert recipients. |
 
-Fire modifies damage, water speed, earth maximum health, air vision. Attribute multiplier is `1 + .10 × matching_stat × equipped_copies × (1 + .10 × void_stat × equipped_void_copies)`. No matching equipped copies gives base values (10/4/30/15). Void alone grants no bonus. Birth gear is empty.
+Fire modifies damage, water speed, earth maximum health, air vision. Attribute multiplier is `1 + .30 × equipped_copies × (1 + .10 × equipped_void_copies)`. No matching equipped copies gives base values (10/4/30/15). Void alone grants no bonus. Birth gear is empty.
 
 ## Visual and UI components
 
@@ -57,3 +57,5 @@ Fixed steps run at 30 Hz, scale with speed and stop when paused/hidden/won. Inva
 `PlayerInteractionPlugin` replaces all drawing/erasing. Carrier-only trails retain local freshness navigation. Combat prioritizes visible tower defense, then homeward orders/cargo, then visible enemy pursuit, deposits, trails and exploration. Returning units shoot in-range enemies without chasing. No energy component, clock, cost or recharge remains.
 
 New pickups fill the first empty equipment slot not reserved by an exchange. Otherwise the pickup becomes gathered cargo. ReturnEquipment moves gear into cargo immediately; that cargo may accompany one gathered unit, stays carried if an order is replaced, and is credited to stock only on delivery.
+
+Equipment percentages are fixed: Fire +30% base damage, Water +30% base speed, Earth +30% base maximum health, Air +30% base vision, per equipped copy. Void increases these bonuses by 10% per equipped copy. Birth recipe points remain metadata and do not change these rates. One Fire gives 13 damage; Fire + Void gives 13.3; three Fire gives 19. Bases remain 10 damage, 4 units/s, 30 health and 15 vision.

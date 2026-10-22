@@ -1,7 +1,7 @@
 //! Local, renderer-independent rawElement gathering.
 use crate::model::*;
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub struct GatheringPlugin;
 impl Plugin for GatheringPlugin {
@@ -39,9 +39,9 @@ impl GatheringRuntime {
         ((n ^ (n >> 31)) >> 40) as f32 / 16_777_216.0
     }
 }
-/// Lowest arrived sequence per trip prevents joining an exhausted trail again.
+/// Arrived marker identities prevent loops without imposing a trip direction.
 #[derive(Component, Default)]
-struct VisitedTrails(HashMap<u64, u32>);
+struct VisitedTrailMarkers(HashSet<Entity>);
 
 pub fn spawn_deposits(commands: &mut Commands, config: &SimulationConfig) {
     let mut runtime = GatheringRuntime {
@@ -220,43 +220,36 @@ fn navigate(world: &mut World) {
                     .then_some((e, p.0, *t, d))
             })
             .collect();
+        trails.retain(|(marker, _, _, _)| {
+            world
+                .get::<VisitedTrailMarkers>(entity)
+                .is_none_or(|visited| !visited.0.contains(marker))
+        });
+        trails.sort_by(|a, b| {
+            b.2.remaining
+                .total_cmp(&a.2.remaining)
+                .then_with(|| a.3.total_cmp(&b.3))
+                .then_with(|| stable(world, a.0).cmp(&stable(world, b.0)))
+        });
+        // Reconsider freshness every tick, including while already following a marker.
+        // Consume arrived candidates immediately so the next target is chosen this tick.
         let mut following = None;
-        if let GatheringState::Following { trip, sequence } = state {
-            if let Some(marker) = trails
-                .iter()
-                .find(|(_, _, t, _)| t.trip == trip && t.sequence == sequence)
-            {
-                if marker.3 > 1.0 {
-                    following = Some(*marker)
-                } else {
-                    if world.get::<VisitedTrails>(entity).is_none() {
-                        world.entity_mut(entity).insert(VisitedTrails::default());
-                    }
+        for marker in trails {
+            if marker.3 <= 1.0 {
+                if world.get::<VisitedTrailMarkers>(entity).is_none() {
                     world
-                        .get_mut::<VisitedTrails>(entity)
-                        .unwrap()
-                        .0
-                        .entry(trip)
-                        .and_modify(|s| *s = (*s).min(sequence))
-                        .or_insert(sequence);
+                        .entity_mut(entity)
+                        .insert(VisitedTrailMarkers::default());
                 }
-            }
-            if following.is_none() {
-                trails.retain(|(_, _, t, _)| t.trip == trip && t.sequence < sequence);
-            }
-        }
-        if following.is_none() {
-            trails.retain(|(_, _, t, _)| {
                 world
-                    .get::<VisitedTrails>(entity)
-                    .and_then(|v| v.0.get(&t.trip))
-                    .is_none_or(|s| t.sequence < *s)
-            });
-            trails.sort_by(|a, b| {
-                a.3.total_cmp(&b.3)
-                    .then_with(|| stable(world, a.0).cmp(&stable(world, b.0)))
-            });
-            following = trails.first().copied();
+                    .get_mut::<VisitedTrailMarkers>(entity)
+                    .unwrap()
+                    .0
+                    .insert(marker.0);
+            } else {
+                following = Some(marker);
+                break;
+            }
         }
         if let Some((_, target, t, _)) = following {
             world.entity_mut(entity).insert(GatheringState::Following {
@@ -304,12 +297,11 @@ pub(crate) fn allocate_trip(world: &mut World) -> u64 {
 
 pub(crate) fn clean_trail_memory(world: &mut World) {
     let active: HashSet<_> = world
-        .query::<&Trail>()
+        .query_filtered::<Entity, With<Trail>>()
         .iter(world)
-        .map(|t| t.trip)
         .collect();
-    for mut visited in world.query::<&mut VisitedTrails>().iter_mut(world) {
-        visited.0.retain(|trip, _| active.contains(trip));
+    for mut visited in world.query::<&mut VisitedTrailMarkers>().iter_mut(world) {
+        visited.0.retain(|marker| active.contains(marker));
     }
     let live: HashSet<_> = world
         .query::<&Trail>()
@@ -527,22 +519,22 @@ mod tests {
         assert_eq!(target(&w, u), Vec2::X * 2.0);
     }
     #[test]
-    fn trails_are_friendly_visible_and_followed_toward_lower_sequences() {
+    fn trails_are_friendly_visible_and_visit_each_marker_without_sequence_restrictions() {
         let mut w = world();
         let own = w.spawn_empty().id();
         let enemy = w.spawn_empty().id();
         let u = unit(&mut w, own, 1, Vec2::ZERO);
         marker(&mut w, Vec2::X, Allegiance(enemy), 90, 0);
-        marker(&mut w, Vec2::X * 16.0, Allegiance(own), 91, 0);
+        marker(&mut w, Vec2::X * 30.0, Allegiance(own), 91, 0);
         navigate(&mut w);
         assert!(matches!(
             w.get::<GatheringState>(u).unwrap(),
             GatheringState::Exploring
         ));
-        marker(&mut w, Vec2::X * 2.0, Allegiance(own), 1, 2);
-        marker(&mut w, Vec2::X * 4.0, Allegiance(own), 1, 1);
-        marker(&mut w, Vec2::X * 6.0, Allegiance(own), 1, 0);
-        for (x, seq) in [(2.0, 2), (4.0, 1), (6.0, 0)] {
+        marker(&mut w, Vec2::X * 2.0, Allegiance(own), 1, 0);
+        marker(&mut w, Vec2::X * 4.0, Allegiance(own), 1, 7);
+        marker(&mut w, Vec2::X * 6.0, Allegiance(own), 1, 2);
+        for (x, seq) in [(2.0, 0), (4.0, 7), (6.0, 2)] {
             navigate(&mut w);
             assert_eq!(target(&w, u), Vec2::X * x);
             assert!(
@@ -563,6 +555,54 @@ mod tests {
             GatheringState::Exploring
         ));
     }
+    #[test]
+    fn freshest_marker_redirects_each_tick_and_visibility_is_inclusive() {
+        let mut w = world();
+        let own = w.spawn_empty().id();
+        let u = unit(&mut w, own, 1, Vec2::ZERO);
+        let older = marker(&mut w, Vec2::X * 2.0, Allegiance(own), 99, 0);
+        w.get_mut::<Trail>(older).unwrap().remaining = 10.0;
+        navigate(&mut w);
+        assert_eq!(target(&w, u), Vec2::X * 2.0);
+        // A smaller trip ID and higher sequence still win solely on remaining life.
+        let fresh = marker(&mut w, Vec2::Y * 15.0, Allegiance(own), 1, 9);
+        navigate(&mut w);
+        assert_eq!(target(&w, u), Vec2::Y * 15.0);
+        w.get_mut::<Position>(fresh).unwrap().0 = Vec2::Y * 15.01;
+        navigate(&mut w);
+        assert_eq!(target(&w, u), Vec2::X * 2.0);
+        w.get_mut::<Position>(fresh).unwrap().0 = Vec2::Y * 3.0;
+        w.get_mut::<Trail>(fresh).unwrap().remaining = 0.0;
+        navigate(&mut w);
+        assert_eq!(target(&w, u), Vec2::X * 2.0);
+    }
+
+    #[test]
+    fn equal_freshness_uses_distance_then_stable_identity_and_arrival_is_immediate() {
+        let mut w = world();
+        let own = w.spawn_empty().id();
+        let u = unit(&mut w, own, 1, Vec2::ZERO);
+        let far = marker(&mut w, Vec2::Y * 5.0, Allegiance(own), 1, 1);
+        let high = marker(&mut w, Vec2::X * 3.0, Allegiance(own), 1, 2);
+        let low = marker(&mut w, -Vec2::X * 3.0, Allegiance(own), 2, 9);
+        w.entity_mut(high).insert(SimulationId(20));
+        w.entity_mut(low).insert(SimulationId(10));
+        navigate(&mut w);
+        assert_eq!(target(&w, u), -Vec2::X * 3.0);
+        w.get_mut::<Position>(u).unwrap().0 = -Vec2::X * 2.0;
+        navigate(&mut w);
+        assert!(w.get::<VisitedTrailMarkers>(u).unwrap().0.contains(&low));
+        assert_eq!(target(&w, u), Vec2::X * 3.0);
+        // Even renewed freshness cannot cause this unit to revisit an arrived marker.
+        w.get_mut::<Trail>(low).unwrap().remaining = 100.0;
+        navigate(&mut w);
+        assert_eq!(target(&w, u), Vec2::X * 3.0);
+        w.despawn(low);
+        clean_trail_memory(&mut w);
+        assert!(w.get::<VisitedTrailMarkers>(u).unwrap().0.is_empty());
+        assert!(w.get::<Trail>(far).is_some());
+    }
+
     #[test]
     fn visible_deposit_overrides_trail_and_invisible_continuation_is_rejected() {
         let mut w = world();
@@ -679,7 +719,7 @@ mod tests {
         w.entity_mut(u).insert((
             RawElement(0),
             GatheringState::Following { trip, sequence: 0 },
-            VisitedTrails(HashMap::from([(trip, 7)])),
+            VisitedTrailMarkers(HashSet::from([first, last])),
         ));
         w.despawn(last);
         clean_trail_memory(&mut w);
@@ -690,7 +730,7 @@ mod tests {
         assert_eq!(w.get::<Movement>(u).unwrap().retarget_in, 0.0);
         w.despawn(first);
         clean_trail_memory(&mut w);
-        assert!(w.get::<VisitedTrails>(u).unwrap().0.is_empty());
+        assert!(w.get::<VisitedTrailMarkers>(u).unwrap().0.is_empty());
     }
     #[test]
     fn match_setup_resets_shared_identity_and_pending_gestures() {

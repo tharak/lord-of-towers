@@ -1,4 +1,4 @@
-//! Local, renderer-independent rawElement gathering.
+//! Local, renderer-independent Element gathering.
 use crate::model::*;
 use bevy::prelude::*;
 use std::collections::HashSet;
@@ -48,7 +48,7 @@ pub fn spawn_deposits(commands: &mut Commands, config: &SimulationConfig) {
         random: config.seed,
         next_drop: 0,
     };
-    let mut total = 0;
+    let mut total = [0; 5];
     let mut positions: Vec<Vec2> = Vec::new();
     let towers: Vec<_> = (0..5)
         .map(|i| {
@@ -71,14 +71,15 @@ pub fn spawn_deposits(commands: &mut Commands, config: &SimulationConfig) {
         }
         positions.push(position);
         let amount = 5 + (runtime.unit() * 6.0) as u32;
-        total += amount;
+        let element = Element::ALL[index % Element::ALL.len()];
+        total[element as usize] += amount;
         commands.spawn((
-            Name::new("rawElement deposit"),
+            Name::new(format!("{} deposit", element.name())),
             MatchEntity,
-            EntityKind::RawElementDeposit,
-            RawElementDeposit,
+            EntityKind::ElementDeposit,
+            ElementDeposit,
             Position(position),
-            RawElement(amount),
+            ElementInventory::homogeneous(element, amount),
             SimulationId((1 << 63) + index as u64),
         ));
     }
@@ -86,11 +87,23 @@ pub fn spawn_deposits(commands: &mut Commands, config: &SimulationConfig) {
     commands.insert_resource(TrailIds::default());
     commands.insert_resource(DrawTrailRequests::default());
     commands.insert_resource(EraseTrailRequests::default());
-    commands.insert_resource(RawElementEconomy { initial: total });
+    commands.insert_resource(ElementEconomy {
+        initial: total,
+        consumed: [0; 5],
+    });
 }
-pub fn drop_cargo(commands: &mut Commands, position: Vec2, amount: u32) {
-    if amount > 0 {
-        commands.queue(move |world: &mut World| {
+/// Death drops split mixed stock into homogeneous deposits without changing totals.
+pub fn drop_cargo(commands: &mut Commands, position: Vec2, inventory: ElementInventory) {
+    let counts = inventory.counts();
+    if inventory.is_empty() {
+        return;
+    }
+    commands.queue(move |world: &mut World| {
+        for element in Element::ALL {
+            let amount = counts[element as usize];
+            if amount == 0 {
+                continue;
+            }
             let id = {
                 let mut runtime = world.resource_mut::<GatheringRuntime>();
                 let id = (1_u64 << 62) + runtime.next_drop;
@@ -98,17 +111,18 @@ pub fn drop_cargo(commands: &mut Commands, position: Vec2, amount: u32) {
                 id
             };
             world.spawn((
-                Name::new("Dropped rawElement"),
+                Name::new(format!("Dropped {}", element.name())),
                 MatchEntity,
-                EntityKind::RawElementDeposit,
-                RawElementDeposit,
+                EntityKind::ElementDeposit,
+                ElementDeposit,
                 Position(position),
-                RawElement(amount),
+                ElementInventory::homogeneous(element, amount),
                 SimulationId(id),
             ));
-        });
-    }
+        }
+    });
 }
+
 fn stable(world: &World, entity: Entity) -> u64 {
     world
         .get::<SimulationId>(entity)
@@ -164,14 +178,14 @@ fn navigate(world: &mut World) {
             world.get::<Allegiance>(entity).copied(),
             world.get::<Vision>(entity).copied(),
             world.get::<GatheringState>(entity).copied(),
-            world.get::<RawElement>(entity).copied(),
+            world.get::<ElementInventory>(entity).cloned(),
         ) else {
             continue;
         };
         if world.get::<Movement>(entity).is_none() {
             continue;
         }
-        if cargo.0 > 0 {
+        if !cargo.is_empty() {
             let previous = match state {
                 GatheringState::Returning { tower } => tower,
                 _ => None,
@@ -192,11 +206,11 @@ fn navigate(world: &mut World) {
             continue;
         }
         let mut deposits: Vec<_> = world
-            .query_filtered::<(Entity, &Position, &RawElement), With<RawElementDeposit>>()
+            .query_filtered::<(Entity, &Position, &ElementInventory), With<ElementDeposit>>()
             .iter(world)
             .filter_map(|(e, p, a)| {
                 let d = position.0.distance_squared(p.0);
-                (d <= vision.radius * vision.radius && a.0 > 0).then_some((e, p.0, d))
+                (d <= vision.radius * vision.radius && !a.is_empty()).then_some((e, p.0, d))
             })
             .collect();
         deposits.sort_by(|a, b| {
@@ -330,7 +344,7 @@ pub(crate) fn marker(
     let remaining = world.resource::<SimulationConfig>().trail_lifetime;
     world
         .spawn((
-            Name::new("rawElement trail"),
+            Name::new("Element trail"),
             MatchEntity,
             EntityKind::Trail,
             Position(position),
@@ -346,7 +360,7 @@ pub(crate) fn marker(
 fn collect(world: &mut World) {
     let radius = world.resource::<SimulationConfig>().pickup_radius;
     let mut deposits: Vec<_> = world
-        .query_filtered::<Entity, With<RawElementDeposit>>()
+        .query_filtered::<Entity, With<ElementDeposit>>()
         .iter(world)
         .collect();
     deposits.sort_by_key(|e| stable(world, *e));
@@ -355,11 +369,11 @@ fn collect(world: &mut World) {
             continue;
         };
         let mut candidates: Vec<_> = world
-            .query_filtered::<(Entity, &Position, &RawElement, &Vision), With<Minion>>()
+            .query_filtered::<(Entity, &Position, &ElementInventory, &Vision), With<Minion>>()
             .iter(world)
             .filter_map(|(e, p, a, v)| {
                 let d = p.0.distance_squared(position.0);
-                (a.0 == 0 && d <= radius * radius && d <= v.radius * v.radius).then_some((e, d))
+                (a.is_empty() && d <= radius * radius && d <= v.radius * v.radius).then_some((e, d))
             })
             .collect();
         candidates.sort_by(|a, b| {
@@ -367,12 +381,12 @@ fn collect(world: &mut World) {
                 .then_with(|| stable(world, a.0).cmp(&stable(world, b.0)))
         });
         for (entity, _) in candidates {
-            let Some(amount) = world.get::<RawElement>(deposit).copied() else {
+            let Some(element) = world
+                .get::<ElementInventory>(deposit)
+                .and_then(|inventory| inventory.units.front().copied())
+            else {
                 break;
             };
-            if amount.0 == 0 {
-                break;
-            }
             let Some(owner) = world.get::<Allegiance>(entity).copied() else {
                 continue;
             };
@@ -380,7 +394,7 @@ fn collect(world: &mut World) {
             let tower = nearest_tower(world, p, owner.0);
             let trip = allocate_trip(world);
             world.entity_mut(entity).insert((
-                RawElement(1),
+                ElementInventory::homogeneous(element, 1),
                 GatheringState::Returning { tower },
                 TrailEmitter {
                     trip,
@@ -389,8 +403,9 @@ fn collect(world: &mut World) {
                 },
             ));
             marker(world, p, owner, trip, 0);
-            world.get_mut::<RawElement>(deposit).unwrap().0 -= 1;
-            if amount.0 == 1 {
+            let mut stock = world.get_mut::<ElementInventory>(deposit).unwrap();
+            stock.units.pop_front();
+            if stock.is_empty() {
                 world.despawn(deposit);
                 break;
             }
@@ -410,22 +425,22 @@ fn deliver(world: &mut World) {
             world.get::<Position>(tower),
             world.get::<Allegiance>(entity),
             world.get::<Allegiance>(tower),
-            world.get::<RawElement>(entity),
+            world.get::<ElementInventory>(entity),
         ) else {
             continue;
         };
-        if cargo.0 == 0 || a != ta || p.0.distance_squared(tp.0) > radius * radius {
+        if cargo.is_empty() || a != ta || p.0.distance_squared(tp.0) > radius * radius {
             continue;
         }
-        let amount = cargo.0;
-        if let Some(mut stock) = world.get_mut::<RawElement>(tower) {
-            stock.0 += amount;
+        let cargo = cargo.clone();
+        if let Some(mut stock) = world.get_mut::<ElementInventory>(tower) {
+            stock.units.extend(cargo.units);
         } else {
             continue;
         }
         world
             .entity_mut(entity)
-            .insert((RawElement(0), GatheringState::Exploring))
+            .insert((ElementInventory::default(), GatheringState::Exploring))
             .remove::<TrailEmitter>();
         if let Some(mut movement) = world.get_mut::<Movement>(entity) {
             movement.retarget_in = 0.0;

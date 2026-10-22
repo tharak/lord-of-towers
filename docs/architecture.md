@@ -20,7 +20,7 @@ Shared primitive assets render units, health stacks, resource crowns, projectile
 
 The centered control bar has seven buttons: pause/play, 1×, 2×, 4×, restart, Draw, Erase. `PauseIcon(bool)` identifies rectangular UI icon pieces. The independent top-right HUD toggle uses `HudToggleText`; `HudVisibility` retains the user's choice across restart and responsive layout changes. `HudRoot`, `HudTitle`, `DesktopDetail` and `ControlBar` identify private responsive presentation roles. Hiding the HUD leaves its toggle accessible. F3 controls the inspector; no Entities button is present.
 
-`TrailTool` selects Draw or Erase. `CameraGesture` carries pan and pinch scale to presentation. Two fingers discard an unfinished stroke and suppress drawing until all fingers lift. Touch also suppresses synthetic mouse input. UI interaction and an open inspector block world editing. Bounded private `DrawingTrail` samples become `DrawTrailRequests` on release; `EraseTrailRequests` remain responsive while paused. Browser visibility changes `browser_hidden`, preserving the user's pause choice.
+`TrailTool` selects Draw or Erase. `CameraGesture` carries pan and pinch scale to presentation. Two fingers stop adding markers and suppress drawing until all fingers lift; already placed markers remain. Touch also suppresses synthetic mouse input. UI interaction and an open inspector block world editing. Bounded private `DrawingTrail` samples become incremental `DrawTrailRequests` on press and while dragging, with a shared trip identity and stroke-wide spacing; release adds no marker. Restart resets active stroke state; `EraseTrailRequests` remain responsive while paused. Browser visibility changes `browser_hidden`, preserving the user's pause choice.
 
 ## Collaboration and checks
 

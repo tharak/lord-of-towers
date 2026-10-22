@@ -171,7 +171,9 @@ fn navigate(world: &mut World) {
         world.resource::<MatchState>(),
     );
     for entity in units(world) {
-        if world.get::<DragControl>(entity).is_some() { continue; }
+        if world.get::<DragControl>(entity).is_some() {
+            continue;
+        }
         let (Some(position), Some(owner), Some(vision), Some(state), Some(cargo)) = (
             world.get::<Position>(entity).copied(),
             world.get::<Allegiance>(entity).copied(),

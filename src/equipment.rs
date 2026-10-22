@@ -283,7 +283,9 @@ fn navigate_orders(world: &mut World) {
         .copied()
         .collect();
     for order in orders {
-        if world.get::<DragControl>(order.minion).is_some() { continue; }
+        if world.get::<DragControl>(order.minion).is_some() {
+            continue;
+        }
         if !live(world, order.tower) {
             continue;
         }
@@ -305,7 +307,9 @@ fn transfer_orders(world: &mut World) {
         .map(|(e, o)| (e, *o))
         .collect();
     for (entity, order) in orders {
-        if world.get::<DragControl>(order.minion).is_some() { continue; }
+        if world.get::<DragControl>(order.minion).is_some() {
+            continue;
+        }
         let (Some(minion), Some(tower)) = (
             world.get::<Position>(order.minion),
             world.get::<Position>(order.tower),

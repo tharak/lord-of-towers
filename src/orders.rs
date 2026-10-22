@@ -110,7 +110,18 @@ fn select_entity(
             entity.remove::<DragControl>().insert(LegState::Idle);
         }
     };
-    if active.len() >= 2 {
+    // Include transient contacts that may have already ended this frame.
+    let multiple_touches = active.len() >= 2
+        || touches.iter_just_pressed().count() >= 2
+        || pointer
+            .press
+            .and_then(|press| press.touch)
+            .is_some_and(|tracked| {
+                touches
+                    .iter_just_pressed()
+                    .any(|touch| touch.id() != tracked)
+            });
+    if multiple_touches {
         cancel(pointer.press.take(), &mut commands);
         pointer.suppress = true;
     }
@@ -127,6 +138,10 @@ fn select_entity(
     }
     if active.is_empty() {
         pointer.suppress = false;
+    }
+    if multiple_touches && active.len() < 2 {
+        pointer.previous = None;
+        return;
     }
     let Ok((camera, transform)) = cameras.single() else {
         return;
@@ -160,6 +175,54 @@ fn select_entity(
     if pointer.suppress {
         return;
     }
+    if pointer.press.is_none() {
+        let pressed_touch = touches.iter_just_pressed().next();
+        let position = pressed_touch.map(|t| t.position()).or_else(|| {
+            (pointer.cooldown <= 0.0 && mouse.just_pressed(MouseButton::Left))
+                .then(|| window.and_then(Window::cursor_position))
+                .flatten()
+        });
+        let Some(position) = position.filter(|p| inside(*p) && !over_ui(*p)) else {
+            return;
+        };
+        let Some(owner) = player.iter().next() else {
+            return;
+        };
+        let picked = entities
+            .iter()
+            .filter(|(_, _, allegiance, health, _)| *allegiance == owner && health.current > 0.0)
+            .filter_map(|(entity, point, _, _, tower)| {
+                let screen = camera
+                    .world_to_viewport(
+                        transform,
+                        Vec3::new(
+                            point.0.x,
+                            if tower.is_some() { 2.0 } else { 0.5 },
+                            point.0.y,
+                        ),
+                    )
+                    .ok()?;
+                let distance = screen.distance_squared(position);
+                (distance
+                    <= if tower.is_some() {
+                        38.0_f32.powi(2)
+                    } else {
+                        28.0_f32.powi(2)
+                    })
+                .then_some((entity, distance, tower.is_none()))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        // Keep the panel closed during a press so its new bounds cannot intercept the gesture.
+        selection.entity = None;
+        pointer.press = Some(PointerPress {
+            touch: pressed_touch.map(|t| t.id()),
+            start: position,
+            entity: picked.map(|p| p.0),
+            minion: picked.is_some_and(|p| p.2),
+            dragging: false,
+            moved: false,
+        });
+    }
     if let Some(mut press) = pointer.press.take() {
         let canceled = press
             .touch
@@ -181,7 +244,7 @@ fn select_entity(
             .is_none_or(|e| entities.get(e).is_ok_and(|(_, _, _, h, _)| h.current > 0.0));
         if canceled
             || !alive
-            || position.is_none_or(|p| !inside(p) || over_ui(p))
+            || position.is_none_or(|p| !inside(p) || (released && over_ui(p)))
             || (!released && press.touch.is_none() && !mouse.pressed(MouseButton::Left))
         {
             cancel(Some(press), &mut commands);
@@ -230,52 +293,6 @@ fn select_entity(
         }
         return;
     }
-    let pressed_touch = touches.iter_just_pressed().next();
-    let position = pressed_touch.map(|t| t.position()).or_else(|| {
-        (pointer.cooldown <= 0.0 && mouse.just_pressed(MouseButton::Left))
-            .then(|| window.and_then(Window::cursor_position))
-            .flatten()
-    });
-    let Some(position) = position.filter(|p| inside(*p) && !over_ui(*p)) else {
-        return;
-    };
-    let Some(owner) = player.iter().next() else {
-        return;
-    };
-    let picked = entities
-        .iter()
-        .filter(|(_, _, allegiance, health, _)| *allegiance == owner && health.current > 0.0)
-        .filter_map(|(entity, point, _, _, tower)| {
-            let screen = camera
-                .world_to_viewport(
-                    transform,
-                    Vec3::new(
-                        point.0.x,
-                        if tower.is_some() { 2.0 } else { 0.5 },
-                        point.0.y,
-                    ),
-                )
-                .ok()?;
-            let distance = screen.distance_squared(position);
-            (distance
-                <= if tower.is_some() {
-                    38.0_f32.powi(2)
-                } else {
-                    28.0_f32.powi(2)
-                })
-            .then_some((entity, distance, tower.is_none()))
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1));
-    // Keep the panel closed during a press so its new bounds cannot intercept the gesture.
-    selection.entity = None;
-    pointer.press = Some(PointerPress {
-        touch: pressed_touch.map(|t| t.id()),
-        start: position,
-        entity: picked.map(|p| p.0),
-        minion: picked.is_some_and(|p| p.2),
-        dragging: false,
-        moved: false,
-    });
 }
 
 fn context_actions(

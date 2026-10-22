@@ -461,7 +461,10 @@ pub struct ArmState {
     pub shooting: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DragPhase { Held, Released }
+pub enum DragPhase {
+    Held,
+    Released,
+}
 /// Active player movement intent; removed on arrival or input cancellation.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct DragControl {

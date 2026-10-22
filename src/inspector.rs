@@ -277,10 +277,18 @@ fn append_gameplay_details(text: &mut String, entity: &EntityRef) {
         let _ = writeln!(text, "Leg animation state: {state:?}");
     }
     if let Some(state) = entity.get::<ArmState>() {
-        let _ = writeln!(text, "Arms: carrying={} shooting={}", state.carrying, state.shooting);
+        let _ = writeln!(
+            text,
+            "Arms: carrying={} shooting={}",
+            state.carrying, state.shooting
+        );
     }
     if let Some(drag) = entity.get::<DragControl>() {
-        let _ = writeln!(text, "Drag: {:?} target ({:.1}, {:.1})", drag.phase, drag.target.x, drag.target.y);
+        let _ = writeln!(
+            text,
+            "Drag: {:?} target ({:.1}, {:.1})",
+            drag.phase, drag.target.x, drag.target.y
+        );
     }
     if let Some(state) = entity.get::<GatheringState>() {
         let _ = writeln!(text, "Gathering: {state:?}");

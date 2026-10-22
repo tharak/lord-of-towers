@@ -536,11 +536,11 @@ fn sync_stacks(world: &mut World) {
         }
     }
 }
-// Eight pieces per tier keep each unit count visible without scaling by inventory.
-fn donut_transform(index: usize, tower: bool) -> Transform {
+// Minion cargo stays in eight-piece crown tiers.
+fn donut_transform(index: usize) -> Transform {
     let angle = (index % 8) as f32 * std::f32::consts::TAU / 8.0;
-    let radius = if tower { 1.3 } else { 0.65 };
-    let base = if tower { 1.0 } else { 1.15 };
+    let radius = 0.65;
+    let base = 1.15;
     Transform::from_xyz(
         angle.cos() * radius,
         base + (index / 8) as f32 * 0.24,
@@ -560,7 +560,25 @@ fn sync_donut_visuals(world: &mut World) {
         .map(|(entity, raw, tower)| (entity, raw.clone(), tower.is_some()))
         .collect();
     for (parent, inventory, tower) in inventories {
-        let count = inventory.total();
+        // Group presentation by type without changing the authoritative FIFO stock.
+        let counts = inventory.counts();
+        let donuts: Vec<_> = if tower {
+            Element::ALL
+                .into_iter()
+                .flat_map(|element| {
+                    (0..counts[element as usize] as usize).map(move |level| (element, level))
+                })
+                .collect()
+        } else {
+            inventory
+                .units
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(index, element)| (element, index))
+                .collect()
+        };
+        let count = donuts.len();
         let mut children: Vec<Entity> = world
             .get::<Children>(parent)
             .map(|children| {
@@ -579,36 +597,50 @@ fn sync_donut_visuals(world: &mut World) {
         } else {
             0.0
         };
-        for (index, child) in children.iter().enumerate() {
-            let mut transform = donut_transform(index, tower);
+        let transform_for = |element: Element, level: usize| {
+            let mut transform = if tower {
+                let angle =
+                    element as usize as f32 * std::f32::consts::TAU / Element::ALL.len() as f32;
+                let stack = Stack {
+                    count: counts[element as usize] as usize,
+                    columns: 1,
+                    spacing: Vec3::new(0.0, 0.24, 0.0),
+                };
+                let mut transform = stack.transform(level).with_scale(Vec3::splat(0.36));
+                transform.translation += Vec3::new(angle.cos() * 1.3, 1.0, angle.sin() * 1.3);
+                transform
+            } else {
+                donut_transform(level)
+            };
             transform.translation.y += offset;
+            transform
+        };
+        for (index, child) in children.iter().enumerate() {
+            let (element, level) = donuts[index];
+            let transform = transform_for(element, level);
             world.entity_mut(*child).insert((
                 Name::new(format!(
                     "{} crown donut {}",
-                    inventory.units[index].name(),
+                    donuts[index].0.name(),
                     index + 1
                 )),
                 transform,
-                MeshMaterial3d(materials[inventory.units[index] as usize].clone()),
+                MeshMaterial3d(materials[donuts[index].0 as usize].clone()),
             ));
         }
         for index in children.len()..count {
             world.spawn((
                 Name::new(format!(
                     "{} crown donut {}",
-                    inventory.units[index].name(),
+                    donuts[index].0.name(),
                     index + 1
                 )),
                 EntityKind::DonutVisual,
                 DonutVisual,
                 ChildOf(parent),
                 Mesh3d(mesh.clone()),
-                MeshMaterial3d(materials[inventory.units[index] as usize].clone()),
-                {
-                    let mut transform = donut_transform(index, tower);
-                    transform.translation.y += offset;
-                    transform
-                },
+                MeshMaterial3d(materials[donuts[index].0 as usize].clone()),
+                transform_for(donuts[index].0, donuts[index].1),
             ));
         }
     }

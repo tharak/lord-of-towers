@@ -21,7 +21,7 @@
 | trail | Fading friendly carrier breadcrumb, refreshed within two units; no player drawing. | `Trail` |
 | projectile | Free homing faction-colored shot; damage on impact. | `Projectile` / sphere |
 | influence circle | Fixed tower territory/defense-alert radius; does not recharge minions. | `InfluenceEmitter` / `TowerInfluenceVisual` |
-| crown | Donut arrangement over minion or tower beacon, one per cargo/stock unit. | `DonutVisual` |
+| crown | Donut arrangement over a minion or tower beacon, one per unit. Tower stock has five separate vertical stacks, one per element; minion cargo uses crown tiers. | `DonutVisual` |
 | stack | Generic count-driven visual arrangement for tower health and deposit quantities. | `Stack` / `StackVisual` |
 | HUD | Hideable title, tower summaries and bottom simulation controls. Contextual selection panel is separate. | `HudRoot` |
 

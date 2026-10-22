@@ -20,7 +20,7 @@ Two fingers pan and pinch to zoom. WASD/arrow keys pan and +/− zoom. Space pau
 
 ## Elements, equipment and combat
 
-Thirty seeded deposits contain 5–10 units each, six deposits per element: **fire, water, earth, air and void**. Each deposit is homogeneous and never recharges. A minion carries one unit to a friendly tower. Donut crowns show tower stock and gathered cargo. Up to three orbiting spheres show equipped units in their element colors. Projectiles and unit bodies retain faction colors.
+Thirty seeded deposits contain 5–10 units each, six deposits per element: **fire, water, earth, air and void**. Each deposit is homogeneous and never recharges. A minion carries one unit to a friendly tower. Tower stock appears as five separate vertical donut stacks, one per element, above the beacon. Each donut represents one unit. Minion crowns show carried cargo. Up to three orbiting spheres show equipped units in their element colors. Projectiles and unit bodies retain faction colors.
 
 Every minion has permanent elemental stats starting at **2** each. Five consumed recipe units add matching points only to that newborn. Equipment activates the corresponding bonus: fire damage, water speed, earth maximum health and air vision. Void equipment amplifies these bonuses. For each attribute:
 

@@ -13,7 +13,7 @@
 | `Position`, `Health`, `Movement` | World position, health, and steering target/speed. |
 | `Spawner` | Population cap for minions from a tower; rawElement payment is handled by the spawn system. |
 | `Attack` | Damage, reach, cooldown, and time until the next shot. Eligible enemy minions take priority over towers. Firing spends one energy; damage occurs on projectile impact. |
-| `AttackTrail`, `AttackOrder` | Player-placed destination with tower/assigned minion/optional enemy target, and the minion's reference to its live order. |
+| `AttackTrail`, `AttackOrder` | Numbered player-drawn path markers with issuing tower, path ID and optional target at the end; a follower's `AttackOrder` references its current marker. Drawing itself assigns no minion. |
 | `ShootingPause` | Remaining simulation time that a minion stays still after firing. |
 | `EnergyProjectile` | Target, damage, flight speed, and remaining simulation lifetime of a fired energy sphere. |
 | `Vision` | Local circular radius; default 15. |
@@ -31,7 +31,7 @@
 |---|---|
 | `DonutVisual` | Presentation-only crown child. One per actual rawElement unit; rendered with shared Bevy `Torus` mesh. |
 | `Stack`, `StackVisual` | Reusable visual count/layout and its child primitive; used for tower health cubes and deposit donuts. |
-| `TowerBeacon` | Sphere child atop a tower stack; the attack laser starts here. |
+| `TowerBeacon` | Sphere child atop a tower stack, supporting its rawElement donut crown. |
 | `EnergyOrbVisual` | Presentation-only small sphere child. One per actual stored minion energy point. |
 | `SpectatorCamera` | Camera control target. |
 | `StatusText`, `FactionText`, `Control` | Debug HUD labels and clickable controls. |
@@ -45,8 +45,10 @@
 | Resource | Meaning |
 |---|---|
 | `SimulationConfig` | Default world size, seed, vision, gathering, combat, spawning, trail and energy tuning. |
-| `AttackOrderRequests` | Pending screen-to-world map clicks/touches consumed by the next simulation step. |
-| `CancelAttackOrderRequests` | Pending right-click ground points used to remove the nearest player attack trail. |
+| `AttackOrderRequests` | Pending screen-to-world mouse/touch paths consumed by the next simulation step. |
+| `CancelAttackOrderRequests` | Pending right-click ground points used to remove the whole player path when a marker is within two world units. |
+| `AttackPathIds` | Monotonic path ID sequence, grouping attack-trail marker entities into complete strokes. |
+| `DrawingAttackPath` | In-progress mouse or touch stroke and its sampled world points, committed as one path on release. |
 | `MatchState` | Pause, speed, hidden-tab, elapsed time, winner and restart request. |
 | `FactionEntities` | Five live faction entity IDs for deterministic ownership lookup. |
 | `RawElementEconomy` | Initial resource total and cumulative spending; verifies that live deposits, cargo and stock plus spending equal the initial total. |

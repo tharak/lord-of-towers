@@ -7,11 +7,11 @@
 | **torus** | The Bevy primitive mesh used to draw donuts. It has no gameplay rules. | `Torus` mesh |
 | **tower** | A destructible faction-owned root that supplies energy, holds rawElement stock, and spawns minions. | `Tower` component |
 | **player tower** | Orthanc, the single tower that accepts player attack orders. Control never moves to another tower when Orthanc is destroyed. | `PlayerControlled` component |
-| **tower beacon** | Sphere on top of the tower's health-cube stack; attack-order lasers begin at the beacon. | `TowerBeacon` visual entity |
+| **tower beacon** | Sphere on top of the tower's health-cube stack, supporting the rawElement donut crown. | `TowerBeacon` visual entity |
 | **stack** | A generic visual count/layout for repeated primitives. It draws one health cube per tower health point and one map donut per deposit rawElement unit. | `Stack` component with `StackVisual` children |
 | **minion** | A mobile faction unit with vision, combat energy, a gathering route, and at most one carried rawElement. | `Minion` component |
 | **trail** | A temporary faction-owned breadcrumb left by a carrier. Visible allies follow decreasing sequence numbers toward a deposit. | `Trail` entity/component |
-| **attack trail** | A player-placed order for one Orthanc minion. It follows a clicked hostile unit or holds a clicked map position; Orthanc points a laser at it. Right-click removes the nearest player trail. | `AttackTrail` entity/component and minion `AttackOrder` |
+| **attack trail** | A player-drawn sequence of visible markers. Orthanc minions discover it through vision and follow its increasing sequence toward a clicked enemy or ground hold point. No minion is selected when drawing; right-click near a marker removes its whole path. | `AttackTrail` marker entities and follower `AttackOrder` component |
 | **link** | A live tower-rooted supply edge that transfers combat energy every five simulation seconds. Links do not share vision or rawElement. | `Link` entity/component |
 | **energy** | Combat/forwarding reserve. An attack costs one; towers are unlimited supply roots. It is separate from rawElement. | `EnergyStore` and `EnergyClock` |
 | **energy orb** | A small sphere around a minion, representing one stored energy point. It carries no gameplay energy itself. | `EnergyOrbVisual` entity kind; Bevy `Sphere` mesh |

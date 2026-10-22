@@ -15,7 +15,6 @@ impl Plugin for PresentationPlugin {
                     button_controls,
                     attach_visuals,
                     sync_stacks,
-                    sync_attack_lasers,
                     sync_donut_visuals,
                     sync_energy_orbs,
                     attach_projectile_visuals,
@@ -23,6 +22,7 @@ impl Plugin for PresentationPlugin {
                     sync_visuals,
                     attach_resource_visuals,
                     sync_gathering_visuals,
+                    sync_attack_trail_visuals,
                     sync_link_visuals,
                     ground_colors,
                     update_hud,
@@ -207,7 +207,7 @@ fn setup(
                 Name::new("Camera instructions"),
                 EntityKind::Ui,
                 Text::new(
-                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nLeft click/tap: order   Right click: cancel trail",
+                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nDrag/touch: draw attack trail   Right click near trail: erase",
                 ),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -432,51 +432,6 @@ fn sync_stacks(world: &mut World) {
         }
     }
 }
-fn laser_transform(source: Vec3, target: Vec3) -> Option<Transform> {
-    let delta = target - source;
-    let length = delta.length();
-    (length.is_finite() && length > 0.001).then(|| Transform {
-        translation: (source + target) * 0.5,
-        rotation: Quat::from_rotation_arc(Vec3::X, delta / length),
-        scale: Vec3::new(length, 0.09, 0.09),
-    })
-}
-fn sync_attack_lasers(world: &mut World) {
-    let trails: Vec<_> = world
-        .query::<(Entity, &AttackTrail, &Position)>()
-        .iter(world)
-        .map(|(entity, trail, position)| (entity, *trail, *position))
-        .collect();
-    for (entity, trail, position) in trails {
-        let transform = world.get::<Position>(trail.tower).and_then(|source| {
-            laser_transform(
-                Vec3::new(
-                    source.0.x,
-                    tower_top(world.get::<Health>(trail.tower)) + 0.45,
-                    source.0.y,
-                ),
-                Vec3::new(position.0.x, 0.4, position.0.y),
-            )
-        });
-        let assets = world.resource::<VisualAssets>();
-        let mesh = assets.link.clone();
-        let material = world
-            .get::<Allegiance>(trail.tower)
-            .and_then(|a| world.get::<Faction>(a.0))
-            .map_or_else(|| assets.raw.clone(), |f| assets.materials[f.index].clone());
-        world.entity_mut(entity).insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            transform.unwrap_or_default(),
-            if transform.is_some() {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            },
-        ));
-    }
-}
-
 // Eight pieces per tier keep each unit count visible without scaling by inventory.
 fn donut_transform(index: usize, tower: bool) -> Transform {
     let angle = (index % 8) as f32 * std::f32::consts::TAU / 8.0;
@@ -654,6 +609,7 @@ fn attach_resource_visuals(
     assets: Res<VisualAssets>,
     deposits: Query<Entity, (With<RawElementDeposit>, Without<Transform>)>,
     trails: Query<(Entity, &Allegiance), (With<Trail>, Without<Mesh3d>)>,
+    attack_trails: Query<(Entity, &Allegiance), (With<AttackTrail>, Without<Mesh3d>)>,
     links: Query<(Entity, &Allegiance), (With<Link>, Without<Mesh3d>)>,
     factions: Query<&Faction>,
 ) {
@@ -663,6 +619,15 @@ fn attach_resource_visuals(
             .insert((MeshMaterial3d(assets.raw.clone()), Transform::default()));
     }
     for (entity, allegiance) in &trails {
+        if let Ok(faction) = factions.get(allegiance.0) {
+            commands.entity(entity).insert((
+                Mesh3d(assets.trail.clone()),
+                MeshMaterial3d(assets.trail_materials[faction.index][TRAIL_BUCKETS - 1].clone()),
+                Transform::default(),
+            ));
+        }
+    }
+    for (entity, allegiance) in &attack_trails {
         if let Ok(faction) = factions.get(allegiance.0) {
             commands.entity(entity).insert((
                 Mesh3d(assets.trail.clone()),
@@ -715,6 +680,12 @@ fn sync_gathering_visuals(
                 [trail_bucket(trail.remaining, config.trail_lifetime)]
             .clone();
         }
+    }
+}
+fn sync_attack_trail_visuals(mut trails: Query<(&Position, &mut Transform), With<AttackTrail>>) {
+    for (position, mut transform) in &mut trails {
+        transform.translation = Vec3::new(position.0.x, 0.13, position.0.y);
+        transform.scale = Vec3::splat(1.25);
     }
 }
 // Stretch a unit cuboid along local X. Gameplay endpoints remain independent of mesh size.
@@ -1125,7 +1096,6 @@ mod tests {
             (
                 attach_visuals,
                 sync_stacks,
-                sync_attack_lasers,
                 sync_donut_visuals,
                 sync_energy_orbs,
                 attach_projectile_visuals,
@@ -1133,6 +1103,7 @@ mod tests {
                 sync_visuals,
                 attach_resource_visuals,
                 sync_gathering_visuals,
+                sync_attack_trail_visuals,
                 sync_link_visuals,
             )
                 .chain(),
@@ -1213,10 +1184,12 @@ mod tests {
             .spawn((
                 AttackTrail {
                     tower,
-                    assigned: minion,
-                    target: Some(minion),
+                    path_id: 0,
+                    sequence: 0,
+                    target: None,
                 },
                 Position(Vec2::new(8.0, 3.0)),
+                Allegiance(own),
             ))
             .id();
         app.world_mut().run_schedule(Update);
@@ -1232,16 +1205,12 @@ mod tests {
         let stack = *app.world().get::<Stack>(tower).unwrap();
         assert_eq!(stack.count, 19);
         assert!(stack.transform(16).translation.y > stack.transform(0).translation.y);
-        let beam = *app.world().get::<Transform>(attack).unwrap();
-        assert!(
-            beam.transform_point(Vec3::NEG_X * 0.5)
-                .distance(Vec3::new(2.0, 1.81, 0.0))
-                < 0.0001
-        );
-        assert!(
-            beam.transform_point(Vec3::X * 0.5)
-                .distance(Vec3::new(8.0, 0.4, 3.0))
-                < 0.0001
+        let marker = app.world().get::<Transform>(attack).unwrap();
+        assert_eq!(marker.translation, Vec3::new(8.0, 0.13, 3.0));
+        assert_eq!(marker.scale, Vec3::splat(1.25));
+        assert_eq!(
+            app.world().get::<Mesh3d>(attack).unwrap().0,
+            app.world().resource::<VisualAssets>().trail
         );
         app.world_mut().get_mut::<Position>(attack).unwrap().0 = Vec2::new(9.0, 4.0);
         app.world_mut().get_mut::<Health>(tower).unwrap().current = 1.0;
@@ -1250,16 +1219,9 @@ mod tests {
         assert_eq!(pieces(app.world_mut(), tower).len(), 1);
         let deposit_pieces = pieces(app.world_mut(), deposit);
         assert_eq!(deposit_pieces.len(), 2);
-        let beam = app.world().get::<Transform>(attack).unwrap();
-        assert!(
-            beam.transform_point(Vec3::X * 0.5)
-                .distance(Vec3::new(9.0, 0.4, 4.0))
-                < 0.0001
-        );
-        assert!(
-            beam.transform_point(Vec3::NEG_X * 0.5)
-                .distance(Vec3::new(2.0, 1.13, 0.0))
-                < 0.0001
+        assert_eq!(
+            app.world().get::<Transform>(attack).unwrap().translation,
+            Vec3::new(9.0, 0.13, 4.0)
         );
         app.world_mut().despawn(attack);
         assert!(app.world().get_entity(attack).is_err());

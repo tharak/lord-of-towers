@@ -235,11 +235,13 @@ pub struct Trail {
     pub sequence: u32,
     pub remaining: f32,
 }
-/// A player-placed destination; the optional enemy target updates its position each step.
+/// A persistent player signal discovered by eligible minions within vision.
+/// The optional enemy target updates its position each step.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct AttackTrail {
     pub tower: Entity,
-    pub assigned: Entity,
+    pub path_id: u64,
+    pub sequence: u32,
     pub target: Option<Entity>,
 }
 
@@ -249,11 +251,15 @@ pub struct AttackOrder {
     pub trail: Entity,
 }
 
-/// Screen-to-world input is queued until the next simulation step.
+/// Completed pointer gestures, each an ordered world-space polyline, queued for simulation.
 #[derive(Resource, Default)]
-pub struct AttackOrderRequests(pub Vec<Vec2>);
+pub struct AttackOrderRequests(pub Vec<Vec<Vec2>>);
 
-/// Right-click locations pending cancellation of the closest player attack trail.
+/// Monotonic identity for player-drawn attack paths.
+#[derive(Resource, Default)]
+pub struct AttackPathIds(pub u64);
+
+/// Right-click locations pending cancellation of the closest player attack path.
 #[derive(Resource, Default)]
 pub struct CancelAttackOrderRequests(pub Vec<Vec2>);
 #[derive(Component, Clone, Copy, Debug)]

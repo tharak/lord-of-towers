@@ -12,7 +12,10 @@ struct PointerState {
 struct ContextPanel;
 #[derive(Component, Clone, Debug)]
 enum ContextAction {
-    Slot(usize),
+    Equipment {
+        command: PlayerCommand,
+        cancel: bool,
+    },
     Recipe(usize, bool),
     Command(PlayerCommand),
 }
@@ -180,7 +183,18 @@ fn context_actions(
             continue;
         }
         match action {
-            ContextAction::Slot(slot) => selection.slot = *slot,
+            ContextAction::Equipment { command, cancel } => {
+                if *cancel {
+                    if let PlayerCommand::Equip { minion, .. }
+                    | PlayerCommand::ReturnEquipment { minion, .. } = command
+                    {
+                        commands
+                            .0
+                            .push(PlayerCommand::CancelOrder { minion: *minion });
+                    }
+                }
+                commands.0.push(command.clone());
+            }
             ContextAction::Recipe(index, add) => {
                 if *add {
                     selection.recipe[*index] += 1;
@@ -208,7 +222,6 @@ fn row(label: impl Into<String>, action: Option<ContextAction>) -> Row {
 
 fn context_panel(world: &mut World) {
     let selected = world.resource::<PlayerSelection>().entity;
-    let slot = world.resource::<PlayerSelection>().slot.min(2);
     let recipe = world.resource::<PlayerSelection>().recipe;
     let owner = world
         .query_filtered::<&Allegiance, (With<Tower>, With<PlayerControlled>)>()
@@ -224,6 +237,7 @@ fn context_panel(world: &mut World) {
         world.resource_mut::<PlayerSelection>().entity = valid;
     }
     let mut rows = Vec::new();
+    let mut equipment_rows = Vec::new();
     let mut heading = String::new();
     let mut anchor = Vec2::ZERO;
     let mut viewport = Vec2::new(320.0, 640.0);
@@ -281,98 +295,74 @@ fn context_panel(world: &mut World) {
                 ),
             ));
         } else {
-            heading = "Minion equipment".into();
             let gear = world
                 .get::<EquippedElements>(entity)
                 .copied()
                 .unwrap_or_default();
             let pending = world
-                .query::<&EquipmentOrder>()
+                .query::<(&EquipmentOrder, &ElementInventory)>()
                 .iter(world)
-                .find(|o| o.minion == entity)
-                .copied();
-            rows.push(row(
-                pending.map_or_else(
-                    || "No pending tower order".into(),
-                    |o| format!("Pending: {:?}", o.action),
-                ),
-                None,
-            ));
-            for i in 0..3 {
-                rows.push(row(
-                    format!(
-                        "{} Slot {}: {}",
-                        if slot == i { "›" } else { "" },
-                        i + 1,
-                        gear.slots[i].map_or("Empty", Element::name)
-                    ),
-                    Some(ContextAction::Slot(i)),
-                ));
-            }
+                .find(|(order, _)| order.minion == entity)
+                .map(|(order, stock)| (*order, stock.counts()));
             let nearest = world.query_filtered::<(Entity, &Position, &Allegiance, &Health, &ElementInventory), With<Tower>>().iter(world)
                 .filter(|(_, _, a, h, _)| Some(**a) == owner && h.current > 0.0)
                 .min_by(|a, b| a.1.0.distance_squared(position).total_cmp(&b.1.0.distance_squared(position)))
                 .map(|(e, _, _, _, stock)| (e, stock.counts()));
-            for element in Element::ALL {
-                let available = nearest.map_or(0, |(_, stock)| stock[element as usize]);
-                let mut choice = row(
-                    format!("Equip {} ({available})", element.name()),
-                    nearest
-                        .filter(|_| available > 0 && pending.is_none())
-                        .map(|(tower, _)| {
-                            ContextAction::Command(PlayerCommand::Equip {
+            for slot in 0..3 {
+                let mut choices = Vec::new();
+                for element in Element::ALL {
+                    let equipped = gear.slots[slot] == Some(element);
+                    let action = nearest.and_then(|(tower, stock)| {
+                        let refunded = pending
+                            .filter(|(order, _)| order.tower == tower)
+                            .map_or(0, |(_, stock)| stock[element as usize]);
+                        let command = if equipped {
+                            PlayerCommand::ReturnEquipment {
+                                minion: entity,
+                                tower,
+                                slot,
+                            }
+                        } else if stock[element as usize] > 0 || refunded > 0 {
+                            PlayerCommand::Equip {
                                 minion: entity,
                                 tower,
                                 slot,
                                 element,
-                            })
-                        }),
-                );
-                choice.color = element.color();
-                rows.push(choice);
+                            }
+                        } else {
+                            return None;
+                        };
+                        Some(ContextAction::Equipment {
+                            command,
+                            cancel: pending.is_some(),
+                        })
+                    });
+                    let mut choice = row(element.name(), action);
+                    choice.color = element.color();
+                    choices.push((choice, equipped));
+                }
+                equipment_rows.push(choices);
             }
-            rows.push(row(
-                "Return selected equipment",
-                nearest
-                    .filter(|_| pending.is_none() && gear.slots[slot].is_some())
-                    .map(|(tower, _)| {
-                        ContextAction::Command(PlayerCommand::ReturnEquipment {
-                            minion: entity,
-                            tower,
-                            slot,
-                        })
-                    }),
-            ));
-            let cargo = world
-                .get::<ElementInventory>(entity)
-                .is_some_and(|i| !i.is_empty());
-            rows.push(row(
-                "Deliver cargo",
-                nearest
-                    .filter(|_| pending.is_none() && cargo)
-                    .map(|(tower, _)| {
-                        ContextAction::Command(PlayerCommand::DeliverCargo {
-                            minion: entity,
-                            tower,
-                        })
-                    }),
-            ));
-            rows.push(row(
-                "Cancel pending order",
-                pending
-                    .map(|_| ContextAction::Command(PlayerCommand::CancelOrder { minion: entity })),
-            ));
         }
     }
     let signature = format!(
-        "{valid:?}:{slot}:{recipe:?}:{heading}:{}",
+        "{valid:?}:{recipe:?}:{heading}:{:?}:{}",
+        equipment_rows
+            .iter()
+            .flatten()
+            .map(|(r, equipped)| format!("{}:{:?}:{equipped}", r.label, r.action))
+            .collect::<String>(),
         rows.iter()
             .map(|r| format!("{}:{:?}", r.label, r.action))
             .collect::<String>()
     );
     let width = 252.0_f32.min((viewport.x - 16.0).max(1.0));
     let row_height = ((viewport.y - 70.0) / rows.len().max(1) as f32 - 3.0).clamp(14.0, 26.0);
-    let height = (rows.len() as f32 * (row_height + 3.0) + 42.0).min((viewport.y - 16.0).max(1.0));
+    let height = if equipment_rows.is_empty() {
+        (rows.len() as f32 * (row_height + 3.0) + 42.0).min((viewport.y - 16.0).max(1.0))
+    } else {
+        138.0
+    };
     let left =
         (anchor.x + 20.0).clamp(8.0_f32.min(viewport.x), (viewport.x - width - 8.0).max(8.0));
     let top = (anchor.y - height * 0.5).clamp(
@@ -424,15 +414,75 @@ fn context_panel(world: &mut World) {
             BackgroundColor(Color::srgba(0.035, 0.045, 0.065, 0.97)),
         ))
         .with_children(|panel| {
-            panel.spawn((
-                EntityKind::Ui,
-                Name::new("Selection heading"),
-                Text::new(heading),
-                TextFont {
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
-            ));
+            for (slot, choices) in equipment_rows.into_iter().enumerate() {
+                panel
+                    .spawn((
+                        EntityKind::Ui,
+                        Name::new(format!("Equipment slot {}", slot + 1)),
+                        Node {
+                            width: percent(100),
+                            min_height: px(40),
+                            flex_shrink: 0.0,
+                            column_gap: px(3),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|strip| {
+                        for (choice, equipped) in choices {
+                            let enabled = choice.action.is_some();
+                            let mut button = strip.spawn((
+                                EntityKind::Ui,
+                                Name::new(format!("Slot {} {}", slot + 1, choice.label)),
+                                Node {
+                                    flex_basis: px(0),
+                                    flex_grow: 1.0,
+                                    min_width: px(0),
+                                    min_height: px(40),
+                                    border: UiRect::all(px(2)),
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::Center,
+                                    ..default()
+                                },
+                                BorderColor::all(if equipped { Color::WHITE } else { Color::NONE }),
+                                BackgroundColor(if enabled {
+                                    choice.color
+                                } else {
+                                    choice.color.with_alpha(0.22)
+                                }),
+                            ));
+                            if let Some(action) = choice.action {
+                                button.insert((Button, action));
+                            }
+                            button.with_children(|button| {
+                                button.spawn((
+                                    EntityKind::Ui,
+                                    Name::new("Equipment element label"),
+                                    Text::new(choice.label),
+                                    TextFont {
+                                        font_size: FontSize::Px(11.0),
+                                        ..default()
+                                    },
+                                    TextColor(if enabled {
+                                        Color::WHITE
+                                    } else {
+                                        Color::srgb(0.55, 0.58, 0.62)
+                                    }),
+                                ));
+                            });
+                        }
+                    });
+            }
+            if !heading.is_empty() {
+                panel.spawn((
+                    EntityKind::Ui,
+                    Name::new("Selection heading"),
+                    Text::new(heading),
+                    TextFont {
+                        font_size: FontSize::Px(14.0),
+                        ..default()
+                    },
+                ));
+            }
             for row in rows {
                 let enabled = row.action.is_some();
                 let mut item = panel.spawn((

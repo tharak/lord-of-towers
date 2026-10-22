@@ -32,7 +32,7 @@ Every minion has permanent elemental stats starting at **2** each. Five consumed
 
 Starting and newborn minions have empty slots: damage **10**, speed **4**, maximum health **30**, vision **15**. Void alone gives no bonus. Equipment changes preserve health percentage. Birth recipe points are retained as metadata and no longer scale equipment bonuses.
 
-Minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Only friendly delivery tower locations are globally known; there is no shared faction vision.
+Outside player dragging, minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Only friendly delivery tower locations are globally known; there is no shared faction vision.
 
 At pickup and every two traveled units, carriers refresh the nearest friendly trail within two units or place a new marker. Markers last 30 simulation seconds. Choosing a marker marks every other visible friendly marker visited for that minion; arrival marks the chosen marker visited. Decay stops while paused and scales with simulation speed.
 

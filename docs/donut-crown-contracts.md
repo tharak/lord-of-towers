@@ -1,4 +1,4 @@
-> Historical implementation notes. Combat selection and navigation are superseded by the current [gathering contracts](gathering-contracts.md): closest visible enemy and tower-defense priority replace minion-first attack ordering.
+> Historical implementation notes. All automated tests referenced below have since been removed; current validation is compilation only. Combat selection and navigation are superseded by the current [gathering contracts](gathering-contracts.md): closest visible enemy and tower-defense priority replace minion-first attack ordering.
 
 # Donut crown and combat contracts
 

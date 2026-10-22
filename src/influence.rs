@@ -150,38 +150,3 @@ fn update_influence(
     });
     field.rebuild(&sources);
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn finite_support_and_removed_presence_restore_neutral_ground() {
-        let mut field = InfluenceField::default();
-        field.rebuild(&[(Vec2::ZERO, 2, 10.0, 5.0)]);
-        assert_eq!(controller(field.sample(Vec2::ZERO)), Some(2));
-        assert_eq!(field.sample(Vec2::new(12.0, 0.0)), [0.0; 5]);
-        assert!(field.territory_percentages()[2] > 0.0);
-        field.rebuild(&[]);
-        assert_eq!(field.sample(Vec2::ZERO), [0.0; 5]);
-        assert_eq!(field.territory_percentages(), [0.0; 5]);
-    }
-    #[test]
-    fn equal_presence_is_contested_and_capture_reassigns_influence() {
-        let mut field = InfluenceField::default();
-        field.rebuild(&[(Vec2::ZERO, 0, 8.0, 4.0), (Vec2::ZERO, 1, 8.0, 4.0)]);
-        assert_eq!(controller(field.sample(Vec2::ZERO)), None);
-        field.rebuild(&[(Vec2::ZERO, 1, 8.0, 4.0)]);
-        assert_eq!(controller(field.sample(Vec2::ZERO)), Some(1));
-        assert_eq!(field.territory_percentages()[0], 0.0);
-    }
-    #[test]
-    fn interpolation_is_continuous_and_outside_is_neutral() {
-        let mut field = InfluenceField::default();
-        field.rebuild(&[(Vec2::ZERO, 0, 12.0, 6.0)]);
-        assert!(
-            (field.sample(Vec2::new(1.9999, 0.0))[0] - field.sample(Vec2::new(2.0001, 0.0))[0])
-                .abs()
-                < 0.001
-        );
-        assert_eq!(field.sample(Vec2::splat(51.0)), [0.0; 5]);
-    }
-}

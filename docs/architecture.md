@@ -24,4 +24,4 @@ The centered control bar has seven buttons: pause/play, 1×, 2×, 4×, restart, 
 
 ## Collaboration and checks
 
-Coordinate shared model changes with the lead. Each agent edits assigned files and commits on its assigned branch; never merge another agent's branch. Record new entity kinds and lifecycles in the catalog and wiki. Add meaningful tests. Routine builds/tests run in GitHub Actions, with local formatting allowed; local execution is reserved for a lead-requested CI reproduction.
+Coordinate shared model changes with the lead. Each agent edits assigned files and commits on its assigned branch; never merge another agent's branch. Record new entity kinds and lifecycles in the catalog and wiki. Validation is compilation only: native `cargo check --locked` and a release WebAssembly build in GitHub Actions. Do not add automated tests or runtime smoke checks. Investigate runtime issues when the user reports them; local compilation runs only when requested.

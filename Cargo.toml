@@ -22,7 +22,3 @@ opt-level = "s"
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
-
-# Headless tests do not need expensive fully optimized renderer dependencies.
-[profile.test.package."*"]
-opt-level = 1

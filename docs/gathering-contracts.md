@@ -28,6 +28,7 @@ Carriers start sequence zero at collection, then emit every two traveled world u
 
 `PlayerDrawnTrail { serial }` is provenance for budget and erasure only. At most `drawn_trail_capacity` live player markers exist globally (default ten). Each new marker evicts the oldest serial when full; carrier markers do not count. Erase/right-click within two world units of a surviving player marker or segment removes its whole trip. Segments connect consecutive surviving sequence values, including gaps. Erasure never removes carrier trails and works while paused. Drawing requires a living `PlayerControlled` tower; existing markers persist after its loss.
 
+
 ## Validation
 
-CI covers inclusive vision, local pursuit and target loss, remaining-lifetime ranking, immediate redirection, deterministic ties, per-marker visits, cargo priority, deterministic collection, finite deposits, death drops, restart, shared trip uniqueness, common lifetime, spacing across an entire stroke, global oldest eviction, segment erasure and stale navigation cleanup. Conservation and bounded entity counts apply throughout extended simulations. Tests/builds run in GitHub Actions; formatting is allowed locally.
+GitHub Actions checks native Rust compilation and builds release WebAssembly. Automated tests and runtime smoke checks are removed; runtime issues are investigated when reported by the user.

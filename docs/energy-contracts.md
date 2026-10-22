@@ -16,6 +16,7 @@ An eligible shot spends `attack_energy_cost` (one), creates an `EnergyProjectile
 
 One `EnergyOrbVisual` sphere child represents each stored minion energy point. An independent `TowerInfluenceVisual` child with `EntityKind::TowerInfluenceVisual` renders a faction-colored primitive circular outline at the exact tower radius. It updates with stock/radius and despawns with its parent. These children contain no energy, inventory or recharge authority.
 
+
 ## Validation
 
-CI tests inclusive boundaries, friendly ownership, growth from retained stock, overlap granting once, contested-area eligibility, capacity, multiple pulses, pause/speed and restart. Combat tests verify energy cost and projectile lifecycles. Routine local builds/tests are not run; formatting is allowed.
+GitHub Actions checks native Rust compilation and builds release WebAssembly. Automated tests and runtime smoke checks are removed; runtime issues are investigated when reported by the user.

@@ -48,4 +48,4 @@ python3 scripts/serve-web.py
 
 Open http://127.0.0.1:4173/lord-of-towers/. The build script installs the wasm-bindgen CLI version recorded in Cargo.lock. WebGL2 needs no server-side application or cross-origin isolation.
 
-Routine builds and tests run in GitHub Actions. PR checks include formatting, Clippy, headless gameplay tests, release WASM and Chromium/Firefox smoke tests. Main deploys after checks pass, followed by a live Pages smoke test. Extended simulation runs check bounded entities and resource conservation. Browser failures retain screenshots and traces. Local formatting is allowed; local builds/tests are reserved for reproducing CI failures when requested by the lead.
+GitHub Actions checks native Rust compilation with `cargo check --locked` and builds release WebAssembly. Main deploys to GitHub Pages after both succeed. There are no automated unit tests, browser tests, extended simulations, or deployed smoke tests. Runtime issues are investigated when reported by the user. Local compilation runs only when requested.

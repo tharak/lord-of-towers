@@ -32,7 +32,7 @@ impl Plugin for SimulationPlugin {
                     SimSet::Combat,
                     SimSet::Capture,
                     SimSet::Gathering,
-                    SimSet::TowerGrowth,
+                    SimSet::Production,
                     SimSet::Energy,
                     SimSet::Influence,
                     SimSet::Victory,
@@ -62,7 +62,7 @@ impl Plugin for SimulationPlugin {
                     .in_set(SimSet::Combat),
             )
             .add_systems(FixedUpdate, resolve_damage.in_set(SimSet::Capture))
-            .add_systems(FixedUpdate, grow_tower_radius.in_set(SimSet::TowerGrowth))
+            .add_systems(FixedUpdate, produce_minions.in_set(SimSet::Production))
             .add_systems(FixedUpdate, check_victory.in_set(SimSet::Victory));
     }
 }
@@ -170,7 +170,7 @@ fn create_match(
                     current: config.tower_health,
                     max: config.tower_health,
                 },
-                RawElement(0),
+                ElementInventory::default(),
                 InfluenceEmitter {
                     radius: config.tower_influence_radius,
                     strength: 4.0,
@@ -189,6 +189,7 @@ fn create_match(
                 tower,
                 position,
                 Allegiance(faction),
+                ElementStats::default(),
             );
         }
     }
@@ -251,6 +252,7 @@ fn spawn_minion(
     tower: Entity,
     position: Vec2,
     allegiance: Allegiance,
+    stats: ElementStats,
 ) {
     let direction = random.direction();
     let location = (position + direction * 2.8).clamp(
@@ -259,16 +261,18 @@ fn spawn_minion(
     );
     let stable_id = sequence.0;
     sequence.0 += 1;
+    let health = config.minion_health * stats.multiplier(stats.earth);
     commands.spawn((
         (
             SimulationId(stable_id),
+            stats,
             EnergyStore {
                 current: config.initial_energy.min(config.energy_capacity),
                 capacity: config.energy_capacity,
             },
-            RawElement(0),
+            ElementInventory::default(),
             Vision {
-                radius: config.vision_radius,
+                radius: config.vision_radius * stats.multiplier(stats.air),
             },
             GatheringState::Exploring,
             ShootingPause::default(),
@@ -282,16 +286,16 @@ fn spawn_minion(
             OriginTower(tower),
             Position(location),
             Health {
-                current: config.minion_health,
-                max: config.minion_health,
+                current: health,
+                max: health,
             },
             Movement {
-                speed: config.minion_speed,
+                speed: config.minion_speed * stats.multiplier(stats.water),
                 target: location + direction,
                 retarget_in: 0.0,
             },
             Attack {
-                damage: 10.0,
+                damage: 10.0 * stats.multiplier(stats.fire),
                 range: 6.0,
                 cooldown: 0.8,
                 remaining: 0.0,
@@ -304,14 +308,53 @@ fn spawn_minion(
     ));
 }
 
-/// Raw element remains stored: each unit expands the tower's circular area.
-fn grow_tower_radius(
+/// Each birth consumes the oldest five units without changing existing minions.
+fn produce_minions(
+    mut commands: Commands,
     config: Res<SimulationConfig>,
-    mut towers: Query<(&RawElement, &mut InfluenceEmitter), With<Tower>>,
+    mut random: ResMut<RandomStream>,
+    mut sequence: ResMut<SpawnSequence>,
+    mut economy: ResMut<ElementEconomy>,
+    mut towers: Query<
+        (
+            Entity,
+            &SimulationId,
+            &Position,
+            &Allegiance,
+            &Health,
+            &mut ElementInventory,
+        ),
+        With<Tower>,
+    >,
 ) {
-    for (stock, mut emitter) in &mut towers {
-        emitter.radius =
-            config.tower_influence_radius + stock.0 as f32 * config.tower_radius_per_raw;
+    let mut ordered: Vec<_> = towers
+        .iter()
+        .map(|(entity, id, ..)| (id.0, entity))
+        .collect();
+    ordered.sort_by_key(|(id, _)| *id);
+    for (_, entity) in ordered {
+        let Ok((tower, _, position, owner, health, mut inventory)) = towers.get_mut(entity) else {
+            continue;
+        };
+        if health.current <= 0.0 {
+            continue;
+        }
+        while inventory.total() >= ELEMENTS_PER_MINION {
+            let recipe: Vec<_> = inventory.units.drain(..ELEMENTS_PER_MINION).collect();
+            for element in &recipe {
+                economy.consumed[*element as usize] += 1;
+            }
+            spawn_minion(
+                &mut commands,
+                &config,
+                &mut random,
+                &mut sequence,
+                tower,
+                position.0,
+                *owner,
+                ElementStats::from_recipe(recipe),
+            );
+        }
     }
 }
 
@@ -443,7 +486,7 @@ fn select_combat_targets(
             &Vision,
             &EnergyStore,
             &Attack,
-            Option<&RawElement>,
+            Option<&ElementInventory>,
             Option<&TowerDefenseTarget>,
             Option<&mut Movement>,
         ),
@@ -471,7 +514,7 @@ fn select_combat_targets(
             commands.entity(entity).remove::<CombatTarget>();
             continue;
         }
-        let carrying = cargo.is_some_and(|cargo| cargo.0 > 0);
+        let carrying = cargo.is_some_and(|cargo| !cargo.is_empty());
         let target = defense_target.or_else(|| {
             spatial
                 .nearby(position.0, vision.radius.max(0.0))
@@ -655,7 +698,7 @@ fn resolve_damage(
     mut commands: Commands,
     mut pending: ResMut<PendingDamage>,
     mut units: Query<
-        (&mut Health, &Position, Option<&RawElement>),
+        (&mut Health, &Position, Option<&ElementInventory>),
         Or<(With<Tower>, With<Minion>)>,
     >,
     ids: Query<&SimulationId>,
@@ -671,9 +714,9 @@ fn resolve_damage(
             continue;
         }
         if let Some(cargo) = cargo
-            && cargo.0 > 0
+            && !cargo.is_empty()
         {
-            crate::gathering::drop_cargo(&mut commands, position.0, cargo.0);
+            crate::gathering::drop_cargo(&mut commands, position.0, cargo.clone());
         }
         commands.entity(entity).despawn();
     }

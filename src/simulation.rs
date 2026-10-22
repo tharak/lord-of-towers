@@ -48,6 +48,20 @@ impl Plugin for SimulationPlugin {
             .add_systems(FixedUpdate, rebuild_index.in_set(SimSet::Index))
             .add_systems(
                 FixedUpdate,
+                prepare_drag
+                    .after(SimSet::Index)
+                    .before(SimSet::Target)
+                    .run_if(simulation_running),
+            )
+            .add_systems(
+                FixedUpdate,
+                update_arm_states
+                    .after(SimSet::Attributes)
+                    .before(SimSet::Influence)
+                    .run_if(simulation_running),
+            )
+            .add_systems(
+                FixedUpdate,
                 select_combat_targets.in_set(SimSet::CombatTarget),
             )
             .add_systems(FixedUpdate, move_minions.in_set(SimSet::Movement))
@@ -277,6 +291,8 @@ pub(crate) fn spawn_minion(
             },
             GatheringState::Exploring,
             ShootingPause::default(),
+            LegState::default(),
+            ArmState::default(),
         ),
         (
             Name::new("Minion"),
@@ -395,24 +411,80 @@ fn rebuild_index(
     }
 }
 
+/// Remove completed movement intents immediately so targeting can resume this tick.
+fn prepare_drag(world: &mut World) {
+    let half_extent = world.resource::<SimulationConfig>().half_extent;
+    let completed: Vec<Entity> = world
+        .query_filtered::<(Entity, &Position, &DragControl), With<Minion>>()
+        .iter(world)
+        .filter(|(_, position, drag)| {
+            drag.phase == DragPhase::Released
+                && position.0.distance(
+                    drag.target
+                        .clamp(Vec2::splat(-half_extent), Vec2::splat(half_extent)),
+                ) <= 1.0
+        })
+        .map(|(entity, _, _)| entity)
+        .collect();
+    for entity in completed {
+        let mut minion = world.entity_mut(entity);
+        minion.remove::<DragControl>();
+        if let Some(mut movement) = minion.get_mut::<Movement>() {
+            movement.retarget_in = 0.0;
+        }
+        minion.insert(LegState::Idle);
+    }
+}
+
+fn update_arm_states(
+    mut minions: Query<(&ElementInventory, &ShootingPause, &mut ArmState), With<Minion>>,
+) {
+    for (inventory, pause, mut arms) in &mut minions {
+        arms.carrying = !inventory.is_empty();
+        arms.shooting = pause.0 > 0.0;
+    }
+}
+
 fn move_minions(
     time: Res<Time<Fixed>>,
     state: Res<MatchState>,
     config: Res<SimulationConfig>,
     spatial: Res<SpatialIndex>,
     mut minions: Query<
-        (Entity, &mut Position, &Movement, Option<&mut ShootingPause>),
+        (
+            Entity,
+            &mut Position,
+            &Movement,
+            Option<&mut ShootingPause>,
+            Option<&DragControl>,
+            &mut LegState,
+        ),
         With<Minion>,
     >,
 ) {
     let dt = simulation_delta(&time, &state);
-    for (entity, mut position, movement, pause) in &mut minions {
+    for (entity, mut position, movement, pause, drag, mut legs) in &mut minions {
+        if let Some(drag) = drag {
+            let target = drag.target.clamp(
+                Vec2::splat(-config.half_extent),
+                Vec2::splat(config.half_extent),
+            );
+            let offset = target - position.0;
+            position.0 += offset.normalize_or_zero() * (movement.speed * dt).min(offset.length());
+            *legs = match drag.phase {
+                DragPhase::Held => LegState::DragStart,
+                DragPhase::Released => LegState::DragRelease,
+            };
+            continue;
+        }
         if let Some(mut pause) = pause
             && pause.0 > 0.0
         {
             pause.0 = (pause.0 - dt).max(0.0);
+            *legs = LegState::Idle;
             continue;
         }
+        let previous = position.0;
         let offset = movement.target - position.0;
         let mut velocity =
             offset.normalize_or_zero() * movement.speed.min(offset.length() / dt.max(0.0001));
@@ -430,6 +502,11 @@ fn move_minions(
             Vec2::splat(-config.half_extent),
             Vec2::splat(config.half_extent),
         );
+        *legs = if position.0 != previous {
+            LegState::Moving
+        } else {
+            LegState::Idle
+        };
     }
 }
 
@@ -489,11 +566,16 @@ fn select_combat_targets(
             Option<&ElementInventory>,
             Option<&TowerDefenseTarget>,
             Option<&mut Movement>,
+            Option<&DragControl>,
         ),
         With<Minion>,
     >,
 ) {
-    for (entity, position, owner, vision, attack, cargo, defense, movement) in &mut minions {
+    for (entity, position, owner, vision, attack, cargo, defense, movement, drag) in &mut minions {
+        if drag.is_some() {
+            commands.entity(entity).remove::<CombatTarget>();
+            continue;
+        }
         let visible = |target: Entity| {
             spatial
                 .nearby(position.0, vision.radius.max(0.0))
@@ -561,7 +643,7 @@ fn process_tower_alerts(
             &Vision,
             Option<&TowerDefenseTarget>,
         ),
-        With<Minion>,
+        (With<Minion>, Without<DragControl>),
     >,
 ) {
     let alerts = std::mem::take(&mut alerts.0);
@@ -624,7 +706,7 @@ fn collect_damage(
             &Vision,
             Option<&CombatTarget>,
         ),
-        With<Minion>,
+        (With<Minion>, Without<DragControl>),
     >,
     mut alerts: ResMut<PendingTowerAlerts>,
     config: Res<SimulationConfig>,

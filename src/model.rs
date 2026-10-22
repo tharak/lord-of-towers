@@ -226,11 +226,11 @@ impl Element {
     }
     pub fn color(self) -> Color {
         match self {
-            Self::Fire => Color::srgb(1.0, 0.0, 0.0),
-            Self::Water => Color::srgb(0.0, 0.0, 1.0),
-            Self::Earth => Color::srgb(1.0, 1.0, 0.0),
-            Self::Air => Color::srgb(0.0, 1.0, 0.0),
-            Self::Void => Color::BLACK,
+            Self::Fire => Color::srgb(0.784, 0.157, 0.118),
+            Self::Water => Color::srgb(0.275, 0.314, 0.510),
+            Self::Earth => Color::srgb(0.816, 0.627, 0.188),
+            Self::Air => Color::srgb(0.275, 0.490, 0.549),
+            Self::Void => Color::srgb(0.314, 0.314, 0.314),
         }
     }
 }

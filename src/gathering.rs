@@ -39,7 +39,7 @@ impl GatheringRuntime {
         ((n ^ (n >> 31)) >> 40) as f32 / 16_777_216.0
     }
 }
-/// Arrived marker identities prevent loops without imposing a trip direction.
+/// Reached and bypassed marker identities prevent loops without imposing a trip direction.
 #[derive(Component, Default)]
 struct VisitedTrailMarkers(HashSet<Entity>);
 
@@ -234,6 +234,7 @@ fn navigate(world: &mut World) {
                     .then_some((e, p.0, *t, d))
             })
             .collect();
+        let visible_markers: Vec<_> = trails.iter().map(|(marker, ..)| *marker).collect();
         trails.retain(|(marker, _, _, _)| {
             world
                 .get::<VisitedTrailMarkers>(entity)
@@ -265,7 +266,22 @@ fn navigate(world: &mut World) {
                 break;
             }
         }
-        if let Some((_, target, t, _)) = following {
+        if let Some((selected, target, t, _)) = following {
+            // Keep the chosen destination eligible until arrival; bypass its visible neighbors.
+            if world.get::<VisitedTrailMarkers>(entity).is_none() {
+                world
+                    .entity_mut(entity)
+                    .insert(VisitedTrailMarkers::default());
+            }
+            world
+                .get_mut::<VisitedTrailMarkers>(entity)
+                .unwrap()
+                .0
+                .extend(
+                    visible_markers
+                        .into_iter()
+                        .filter(|marker| *marker != selected),
+                );
             world.entity_mut(entity).insert(GatheringState::Following {
                 trip: t.trip,
                 sequence: t.sequence,

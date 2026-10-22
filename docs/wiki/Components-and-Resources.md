@@ -22,7 +22,7 @@
 | `Trail` | Shared carrier/player trip, path sequence and remaining lifetime, default 30 seconds. Highest remaining lifetime wins navigation selection. |
 | `TrailEmitter` | Carrier trip, next sequence and last marker position; emission spacing two. |
 | `PlayerDrawnTrail` | Serial provenance for the ten-marker global budget and whole-stroke erase; no separate navigation behavior. |
-| `VisitedTrailMarkers` | Private per-minion reached-marker identities, preventing repeat visits; pruned when markers disappear. |
+| `VisitedTrailMarkers` | Private per-minion reached/bypassed marker identities. Choosing a trail marks every other visible friendly marker visited; the chosen marker is recorded on arrival. Pruned when markers disappear. |
 | `EnergyStore` | Combat energy initially five, capacity five; friendly tower circles recharge one per pulse. |
 | `InfluenceEmitter` | Finite radial territory contribution. Tower radius stays fixed at default 15. |
 

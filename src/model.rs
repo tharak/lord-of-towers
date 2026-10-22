@@ -262,6 +262,29 @@ pub struct AttackPathIds(pub u64);
 /// Right-click locations pending cancellation of the closest player attack path.
 #[derive(Resource, Default)]
 pub struct CancelAttackOrderRequests(pub Vec<Vec2>);
+
+/// The battlefield tool selected by the player's touch or mouse controls.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrailTool {
+    #[default]
+    Draw,
+    Erase,
+}
+
+/// World-space camera movement and pinch scale queued by touch input.
+#[derive(Resource, Debug)]
+pub struct CameraGesture {
+    pub pan: Vec2,
+    pub zoom: f32,
+}
+impl Default for CameraGesture {
+    fn default() -> Self {
+        Self {
+            pan: Vec2::ZERO,
+            zoom: 1.0,
+        }
+    }
+}
 #[derive(Component, Clone, Copy, Debug)]
 pub struct TrailEmitter {
     pub trip: u64,

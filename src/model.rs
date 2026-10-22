@@ -331,9 +331,15 @@ pub struct PlayerDrawnTrail {
     pub serial: u64,
 }
 
-/// Completed pointer gestures, each an ordered world-space polyline, queued for simulation.
+/// Newly accepted markers from one live pointer stroke, queued for simulation.
+pub struct DrawTrailRequest {
+    pub trip: u64,
+    pub sequence_start: u32,
+    pub points: Vec<Vec2>,
+}
+
 #[derive(Resource, Default)]
-pub struct DrawTrailRequests(pub Vec<Vec<Vec2>>);
+pub struct DrawTrailRequests(pub Vec<DrawTrailRequest>);
 
 /// Shared identity sequence for carrier trips and player strokes.
 #[derive(Resource, Default)]

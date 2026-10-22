@@ -238,6 +238,7 @@ fn restart_match(
         &mut random,
         &mut sequence,
     );
+    commands.queue(crate::orders::reset_drawing);
 }
 
 fn advance_clock(time: Res<Time<Fixed>>, mut state: ResMut<MatchState>) {

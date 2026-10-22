@@ -1,26 +1,30 @@
 # Lord of Towers
 
-A Rust + Bevy ECS strategy simulation. Five towers spawn armies, project territory through their presence, fight, and can be destroyed. All art is made from Bevy primitive meshes.
+A Rust + Bevy ECS strategy simulation built entirely from Bevy primitive meshes.
 
 **Play:** https://tharak.github.io/lord-of-towers/
 
 [![CI and Pages](https://github.com/tharak/lord-of-towers/actions/workflows/ci.yml/badge.svg)](https://github.com/tharak/lord-of-towers/actions/workflows/ci.yml)
 
-## Controls
+## Playing
 
-Use the on-screen buttons or Space to pause, 1/2/3 for 1×/2×/4×, R to restart, and F3 to inspect entities. WASD or arrow keys pan; +/− zoom. Click the canvas if keyboard controls are not focused. The simulation pauses while the tab is hidden. Restart repeats the configured seed.
+Five towers begin with three minions each and zero rawElement stock. These fifteen minions are the entire starting population; no additional minions spawn. Minions gather finite resources and fight nearby rivals. Enemy minions take priority over towers in attack range. Towers are destroyed at zero health, dropping their stock. The last surviving tower wins.
 
-The inspector queries the live ECS world. Cycle kind/faction filters, include engine entities, navigate entities, and page through their component names. It does not store a second entity database.
+You control Orthanc's orange faction. Drag the left mouse button or a finger in **Draw** mode to leave a trail; click or tap for one marker. Friendly empty-handed minions discover trails through their own vision and follow them toward the stroke end. They seek visible deposits first. Carriers continue returning cargo. Drawing assigns no minion and stores no enemy target. Orthanc's death prevents new drawing, while existing trails last until expiry or erasure.
 
-## Simulation
+A stroke accepts markers at least half a vision radius apart from every previously accepted point in that stroke: 7.5 world units by default. Separate strokes may overlap. At most ten player markers exist globally; every new marker replaces the oldest when necessary. Right-click, or tap in **Erase** mode, within two world units of a marker or connecting segment to remove its entire surviving stroke. Carrier trails cannot be erased this way.
 
-Each tower begins as its own faction. Each tower starts with three minions and no rawElement stock. Five delivered rawElement create one new minion, capped at 100 living minions per origin tower; stock is retained while capped. Minions gather and attack nearby rivals. Enemy minions take priority over towers when both are in attack range. Combat damage occurs when fired energy spheres hit; impacts in one fixed step resolve together. Towers are destroyed at zero health and drop their stock. The last tower standing wins.
+Use two fingers to pan and pinch to zoom; lift every finger before drawing again. WASD/arrow keys pan and +/− zoom. Space pauses, 1/2/3 select 1×/2×/4× speed, R restarts the seed, and F3 opens the live ECS inspector. The centered seven-button bar provides pause/play, three speeds, restart, Draw and Erase. Pause/play uses rectangular UI shapes. A standalone top-right **Hide HUD / Show HUD** button hides or restores the HUD, retaining the choice through restart and screen rotation. F3 opens the inspector; there is no Entities button. The battlefield fills portrait and landscape viewports without page scrolling. Hidden browser tabs suspend simulation.
 
-You control Orthanc, the orange tower. Drag with the left mouse button or draw with a finger to leave an attack trail; a click or tap leaves one marker. No minion is assigned when you draw. Orthanc's empty-handed minions discover nearby markers through their vision, follow the trail toward its end, and attack enemies in range. A trail ending on an enemy follows that target while it remains hostile; a trail ending on open ground holds its followers there. Minions carrying rawElement keep delivering it. Right-click near any marker to erase its whole attack trail, including while paused; right-clicking empty ground does nothing. If Orthanc is destroyed, you cannot place new attack trails through another tower.
+## Resources, territory and energy
 
-On phones, use one finger with **Draw** to place paths, or choose **Erase** and tap near a path to remove it. Use two fingers to pan and pinch to zoom; lift both fingers before drawing again. The compact controls provide pause, speed, restart, and the entity inspector in portrait and landscape. The battlefield fills the available viewport without page scrolling.
+Thirty seeded deposits contain 5–10 rawElement each. Deposits never recharge. A minion carries one unit to a friendly tower; death drops cargo and tower destruction drops stock. Delivered stock is retained and grows the tower's influence radius: **15 + stock** world units by default. It is never spent. Remaining deposits + carried cargo + tower stock always equal the initial resource total.
 
-Territory reflects current radial influence, with soft borders and neutral ground where no army or tower is present. It is not permanent paint or a tile movement system. The initial numerical balance is intentionally simple and configurable in `SimulationConfig`.
+Each minion sees a 15-unit circle. It seeks visible deposits, then visible friendly trails, otherwise explores. Only friendly delivery towers are globally known. There is no shared faction vision. Carriers leave a marker every two traveled units; player and carrier markers use the same `Trail` component, rendering, navigation and 30-simulation-second lifetime. Followers move through decreasing sequence numbers. Trail decay stops while paused and scales with speed.
+
+Territory samples current radial influence, with soft borders and contested or neutral ground. Each tower has a faction-colored circular outline showing its exact current radius. Inside or on a friendly tower's circle, a minion gains one energy every five simulation seconds, up to capacity five. Overlapping friendly circles recharge a minion only once per pulse; enemy influence or contested ground does not block recharge.
+
+An attack spends one energy and fires a sphere; damage happens on impact. A minion pauses movement for one simulation second after firing. Shots fizzle when targets disappear or become friendly. Minions gather even at zero energy. One orbiting sphere represents each stored energy point. Donut crowns represent actual rawElement inventory; tower cubes represent health. Neither visual children nor mesh dimensions determine gameplay rules.
 
 | Faction | Color |
 |---|---|
@@ -30,29 +34,11 @@ Territory reflects current radial influence, with soft borders and neutral groun
 | Barad-dur | Green `#0BEF84` |
 | Cirith Ungol | Yellow `#EFF51E` |
 
-## RawElement, vision and trails
+## Architecture and development
 
-Thirty neutral deposits each start with 5–10 rawElement, determined by the match seed. Each unit is shown as one donut in a vertical stack. Minions carry one unit per trip and deliver to the closest friendly tower selected when collecting. Exhausted stacks disappear and never recharge. Minion death drops carried rawElement; tower destruction drops remaining stock as a collectable deposit.
+See [architecture](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [gathering contracts](docs/gathering-contracts.md), [energy contracts](docs/energy-contracts.md), and the [shared wiki vocabulary](https://github.com/tharak/lord-of-towers/wiki). Gameplay and UI use Bevy ECS; simulation state is independent of mesh and material handles.
 
-Every minion has a 15-unit circular field of vision. It seeks visible deposits first, then follows visible friendly trails toward their source; otherwise it explores randomly. Only friendly tower locations are globally known for delivery. Resource, enemy and trail knowledge is not shared between minions. The spectator can still see the entire map.
-
-Carriers leave faction-colored trail markers every two world units. These fade over 30 simulation seconds and remain after delivery or death. Followers traverse only visible markers toward the source, never obtaining remote deposit locations from trail metadata.
-
-One visible donut per rawElement unit forms a crown above each carrying minion or stocked tower, stacked in eight-piece tiers. Towers use vertical stacks of cubes, one per health point, with a sphere beacon and donut crown above. The debug HUD still shows numeric stock; the inspector shows exact inventory, gathering state, vision radius and trail lifetime. Pause freezes trail decay, speed scales it, and restart restores the original deposit quantities and three minions per tower. Supplies are finite for the match.
-
-## Energy and supply
-
-Minions start with five energy and can store at most five. One small sphere circles each minion per stored energy point. Attacking spends one energy immediately and fires a sphere at the target; damage occurs when it hits. Minions stop for one simulation second when they shoot, and their longer attack range lets them defend an ordered position. Shots fizzle if their target disappears or becomes friendly. Gathering continues at zero energy; donuts never provide combat energy.
-
-Straight faction-colored lines are actual Link entities. They connect friendly minions into tower-rooted branches, with at most 15 world units per link. Every five simulation seconds, each tower or connected minion sends one energy total to an eligible child, rotating fairly. Towers supply unlimited energy; minions spend their stored energy, including their last point. Transfers happen simultaneously, so incoming energy cannot travel multiple links in one pulse. Full recipients are skipped. Links do not share vision.
-
-## Architecture and collaboration
-
-See [ECS contracts](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [shared nomenclature on the GitHub wiki](https://github.com/tharak/lord-of-towers/wiki), [gathering contracts](docs/gathering-contracts.md), and the [implementation tickets](https://github.com/tharak/lord-of-towers/milestone/6). Simulation, orders, gathering, energy, influence, presentation and inspection are separate plugins. Components hold gameplay state; systems implement behavior. Meshes/materials live only in presentation, so models can be replaced without changing gameplay ranges or rules.
-
-## Development
-
-Install stable Rust. For native debugging, install Bevy's Linux windowing dependencies and run `cargo run --locked`. For the browser:
+For native debugging, install stable Rust and Bevy's Linux windowing dependencies, then use `cargo run --locked`. Browser setup:
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -60,10 +46,6 @@ bash scripts/build-web.sh
 python3 scripts/serve-web.py
 ```
 
-Open http://127.0.0.1:4173/lord-of-towers/. The script installs the wasm-bindgen CLI version recorded in Cargo.lock. Desktop WebGL2 browsers are the initial target; no server or cross-origin isolation is needed.
+Open http://127.0.0.1:4173/lord-of-towers/. The build script installs the wasm-bindgen CLI version recorded in Cargo.lock. WebGL2 needs no server-side application or cross-origin isolation.
 
-## Testing and releases
-
-Routine testing runs in **GitHub Actions**, not on developer machines. Every PR checks formatting, Clippy, headless gameplay tests, a release WASM build, and Chromium/Firefox smoke tests. Main deploys only after those checks pass; a further smoke test checks the actual Pages URL. Main, scheduled, and manual runs include an extended population-bound simulation. Browser failures retain screenshots and traces as workflow artifacts.
-
-Visual quality can be reviewed directly on Pages. No custom models, external textures, multiplayer, persistence, or mobile controls are included in this prototype.
+Routine builds and tests run in GitHub Actions. PR checks include formatting, Clippy, headless gameplay tests, release WASM and Chromium/Firefox smoke tests. Main deploys after checks pass, followed by a live Pages smoke test. Extended simulation runs check bounded entities and resource conservation. Browser failures retain screenshots and traces. Local formatting is allowed; local builds/tests are reserved for reproducing CI failures when requested by the lead.

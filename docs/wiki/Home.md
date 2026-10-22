@@ -1,9 +1,11 @@
 # Lord of Towers: shared vocabulary
 
-These pages name the ECS concepts used by the game. They are the team reference for issues, code reviews, and later art changes.
+These pages define the current Bevy ECS game contracts for issues, reviews and presentation changes.
 
-- [Nomenclature](Nomenclature): rawElement, donut, torus, tower, minion, trail, link.
-- [Entities](Entities): every application entity kind and its lifetime.
-- [Components and Resources](Components-and-Resources): gameplay state, visual markers, and bounded resources.
+- [Nomenclature](Nomenclature): resources, towers, minions, shared trails and area recharge.
+- [Entities](Entities): every application kind and lifecycle.
+- [Components and Resources](Components-and-Resources): gameplay state, private visual roles and shared resources.
 
-The live inspector queries the ECS world directly. It is not a second entity registry. The repository's [entity catalog](https://github.com/tharak/lord-of-towers/blob/main/docs/entity-catalog.md) mirrors entity lifecycles. Update both when the model changes.
+Five towers start with three minions each; no additional minions spawn. Retained rawElement grows tower radius. Friendly tower circles recharge combat energy. Player and carrier markers share the same temporary Trail behavior.
+
+The live inspector queries ECS directly and is opened with F3. It stores no second entity registry. Keep these pages aligned with the repository [entity catalog](https://github.com/tharak/lord-of-towers/blob/main/docs/entity-catalog.md), [gathering contracts](https://github.com/tharak/lord-of-towers/blob/main/docs/gathering-contracts.md) and [energy contracts](https://github.com/tharak/lord-of-towers/blob/main/docs/energy-contracts.md).

@@ -1,24 +1,23 @@
 # Entities
 
-Every application-created entity has `Name` and `EntityKind`. Gameplay entities carry `MatchEntity` and are replaced on restart. Child visuals inherit their parent lifetime. The live inspector shows their current IDs and components.
+Every application entity has `Name` and `EntityKind`; match entities carry `MatchEntity` and are replaced on restart. Presentation children follow parent lifetimes. The inspector queries the live world directly.
 
-| Entity kind | Purpose and main components | Creation and removal |
+| EntityKind | Components and relationships | Creation and lifetime |
 |---|---|---|
-| `Faction` | Faction identity and index. | Five per match; replaced on restart. |
-| `Tower` | Destructible root with `Allegiance`, `Position`, `Health`, `Spawner`, `RawElement` stock, `ForwardingCursor`, `InfluenceEmitter`, and visual `Stack`. Orthanc alone has `PlayerControlled`. | Five per match. At zero health it despawns and drops its stock; restart recreates the one player tower. |
-| `Minion` | Mobile unit with `Allegiance`, `OriginTower`, `Position`, `Health`, `Movement`, `Attack`, `EnergyStore`, `RawElement` cargo, `Vision`, `GatheringState`, optional `AttackOrder`, `TrailEmitter` and `SupplyConnection`. | Three start at each tower; paid spawns cost five rawElement. Empty-handed Orthanc minions can discover and follow drawn attack paths. Death drops cargo and despawns the unit. |
-| `RawElementDeposit` | Neutral collectable stack of donuts with `Position`, `RawElement` quantity, and visual `Stack`. | Thirty seeded deposits plus cargo and tower-stock drops; removed at zero quantity; no recharge. |
-| `AttackTrail` | One marker in a player-drawn path, with issuing Orthanc tower, path ID, sequence, destination `Position`, and optional hostile target at the end. Shares the gathering trail primitive mesh. | Drag/touch creates numbered markers; click/tap creates one. Minions join after seeing markers within vision. Right-click near any marker removes its path; tower death and restart also remove it. |
-| `StackVisual` | One child cube in a tower-health stack or torus in a map-deposit stack. | Reconciled to its parent's current health or rawElement count. |
-| `TowerBeacon` | Sphere at the top of a tower-health stack and support for donut crown. | One per living tower, removed with parent. |
-| `DonutVisual` | One torus crown piece per rawElement on its parent tower or minion. Holds no inventory. | Visual child added/removed as parent inventory changes; removed with parent. |
-| `EnergyOrbVisual` | One small sphere per point in its parent minion's `EnergyStore`. Holds no energy itself. | Visual child added/removed as stored energy changes; removed with parent. |
-| `EnergyProjectile` | Fired energy sphere with `Position`, `Allegiance`, target, damage, speed and remaining lifetime. | Spawned by an attack; follows a live hostile target; removed on impact, lost target, timeout or restart. |
-| `Trail` | Faction-colored breadcrumb with `Position`, `Allegiance`, trip/sequence and remaining lifetime. | Left every two traveled units by a carrier; expires after 30 simulation seconds. |
-| `Link` | Faction-colored supply edge with source and target entities. | Reconciled each fixed step; removed when endpoints or ownership change. |
-| `Battlefield` | Ground mesh sampled from influence. | Presentation startup; survives match restart. |
-| `Camera` | Spectator camera. | Presentation startup; survives match restart. |
-| `Light` | Scene lighting. | Presentation startup; survives match restart. |
-| `Ui` | HUD, controls, inspector panel, buttons and text. | Presentation/inspector startup; survives match restart. |
+| `Faction` | `Faction { index }` | Five records at setup; remain after faction tower loss; replaced on restart. |
+| `Tower` | `SimulationId`, `Tower { slot }`, `Position`, `Allegiance`, `Health`, `RawElement`, `InfluenceEmitter`; Orthanc alone has `PlayerControlled` | Five at setup, each with three initial minions. No later minion spawning. Destroyed at zero health, dropping stock. Radius is 15 + retained stock by default. |
+| `Minion` | `SimulationId`, `Minion`, `OriginTower`, `Position`, `Allegiance`, `Health`, `Movement`, `Attack`, `EnergyStore`, `ShootingPause`, `RawElement`, `Vision`, `GatheringState`, optional `TrailEmitter` and private `VisitedTrails` | Fifteen at setup. Death drops cargo and despawns. Origin tower death does not change allegiance or destroy survivors; origin references are validated. |
+| `RawElementDeposit` | `RawElementDeposit`, `Position`, `RawElement`, `SimulationId`; presentation `Stack` | Thirty seeded 5–10-unit deposits plus death drops. Collection reduces quantity; empty deposits despawn. Never recharge. |
+| `Trail` | `Trail { trip, sequence, remaining }`, `Position`, `Allegiance`; optional `PlayerDrawnTrail { serial }` | Shared carrier/player markers, lasting 30 simulation seconds. Carriers emit every two traveled units. Player points are half a vision radius apart within each stroke; ten live player markers globally, replacing oldest serials. Erasure within two units of a marker/segment removes the whole player trip, never carriers. Survive origin death/delivery; restart removes all. |
+| `StackVisual` | Private stack-child marker, `ChildOf`, primitive mesh/material/transform | One cube per tower health point or torus per deposit unit. Reconciled with parent count; removed with parent. |
+| `TowerBeacon` | Presentation marker, `ChildOf`, sphere mesh/material/transform | One atop each living tower health stack; crown above it. Removed with parent. |
+| `TowerInfluenceVisual` | Private `TowerInfluenceVisual`, `ChildOf`, primitive mesh/material/transform | One faction-colored circular outline per tower at its exact influence radius. Resized after stock growth; removed with parent. No gameplay authority. |
+| `DonutVisual` | `DonutVisual`, `ChildOf`, shared torus mesh/material/transform | One crown child per actual tower stock or minion cargo unit, in eight-piece tiers. Reconciled to inventory; removed with parent. Stores no inventory. |
+| `EnergyOrbVisual` | Presentation marker, `ChildOf`, shared sphere mesh/material/transform | One orbiting sphere per stored minion energy. Reconciled to store; removed with parent. Stores no energy. |
+| `EnergyProjectile` | `EnergyProjectile { target, damage, speed, remaining }`, `Position`, `Allegiance`; sphere presentation | Created on firing after energy cost. Moves independently of shooter; removed on impact, timeout, missing/friendly target or restart. Damage occurs on impact. |
+| `Battlefield` | Ground primitive mesh/material/transform | Presentation startup; survives restart. Ground samples territory, holding no gameplay ownership. |
+| `Camera` | Camera/projection/transform, private `SpectatorCamera` | Presentation startup; survives restart; responds to keyboard and touch pan/zoom. |
+| `Light` | Lighting/transform | Presentation startup; survives restart. |
+| `Ui` | Bevy `Node`, text/button/interaction and private role components | HUD, toggle, controls and inspector created at startup; survive restart. Details below. |
 
-All meshes and materials are presentation state. `DonutVisual` is never a collectable deposit, and `EnergyOrbVisual` never stores energy. Exact component definitions are listed in [Components and Resources](Components-and-Resources).
+HUD and inspector survive restart. The independent Hide HUD / Show HUD toggle retains its setting through restart and rotation. The centered seven controls are pause/play, three speeds, restart, Draw and Erase. F3 opens the inspector; there is no Entities button. See [Components and Resources](Components-and-Resources) for UI roles and shared state.

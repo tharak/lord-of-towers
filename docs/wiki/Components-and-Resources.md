@@ -2,64 +2,65 @@
 
 ## Gameplay components
 
-| Component | Meaning |
+| Name | Meaning |
 |---|---|
-| `Name`, `EntityKind`, `MatchEntity` | Application label, inspectable category, and match restart lifetime. |
-| `SimulationId` | Stable match-local ordering for deterministic ties; distinct from Bevy entity ID. |
-| `Faction`, `Allegiance` | Faction record and owner reference. |
-| `Tower`, `Minion`, `RawElementDeposit` | Gameplay role markers. Towers are destroyed at zero health. |
-| `PlayerControlled` | Marks exactly one tower, Orthanc (slot 0), as the source of player attack orders. |
-| `OriginTower` | Tower that spawned a minion; population cap counts living minions by this reference. |
-| `Position`, `Health`, `Movement` | World position, health, and steering target/speed. |
-| `Spawner` | Population cap for minions from a tower; rawElement payment is handled by the spawn system. |
-| `Attack` | Damage, reach, cooldown, and time until the next shot. Eligible enemy minions take priority over towers. Firing spends one energy; damage occurs on projectile impact. |
-| `AttackTrail`, `AttackOrder` | Numbered player-drawn path markers with issuing tower, path ID and optional target at the end; a follower's `AttackOrder` references its current marker. Drawing itself assigns no minion. |
-| `ShootingPause` | Remaining simulation time that a minion stays still after firing. |
-| `EnergyProjectile` | Target, damage, flight speed, and remaining simulation lifetime of a fired energy sphere. |
-| `Vision` | Local circular radius; default 15. |
-| `RawElement` | Quantity on a deposit, cargo on a minion (0–1), or stock in a tower. No crown child has this component. |
-| `GatheringState` | Exploring, following a local trail, or returning to a friendly tower. |
-| `TrailEmitter` | Carrier's trip, next marker sequence, and last marker position. |
-| `Trail` | Faction breadcrumb trip, sequence and remaining simulation time. |
-| `EnergyStore` | Minion combat energy, initially five and capped at five. |
-| `ForwardingCursor`, `SupplyConnection`, `Link` | Fair transfer rotation, tower-rooted parent/root, and live supply edge. |
-| `InfluenceEmitter` | Finite-radius territory contribution. |
+| `Name, EntityKind, MatchEntity` | Application identity, category and restart lifetime. |
+| `SimulationId` | Stable match-local tie ordering, distinct from Bevy entity IDs. |
+| `Faction, Allegiance` | Faction record and owner reference. |
+| `Tower, Minion, RawElementDeposit` | Gameplay roles. Five towers and fifteen initial minions; no later spawning. |
+| `PlayerControlled` | Orthanc alone accepts new player drawings; control never transfers after its loss. |
+| `OriginTower` | Initial creator reference, validated before use; origin death does not destroy a minion. |
+| `Position, Health, Movement` | X/Z ground position, health, steering speed and target. |
+| `Attack, ShootingPause` | Shot damage/range/cooldown and one-second movement pause after firing. Shots cost one energy. |
+| `EnergyProjectile` | Live hostile target, damage, speed and remaining flight lifetime; damage on impact. |
+| `RawElement` | Finite deposit quantity, cargo 0–1, or retained tower stock. No visual child holds it. |
+| `Vision` | Inclusive local detection circle, default 15. |
+| `GatheringState` | Exploring, Following { trip, sequence }, or Returning { tower }. |
+| `Trail` | Shared carrier/player trip, decreasing-follow sequence and remaining lifetime, default 30 seconds. |
+| `TrailEmitter` | Carrier trip, next sequence and last marker position; emission spacing two. |
+| `PlayerDrawnTrail` | Serial provenance for the ten-marker global budget and whole-stroke erase; no separate navigation behavior. |
+| `VisitedTrails` | Private gathering memory avoiding exhausted trips; pruned when trips disappear. |
+| `EnergyStore` | Combat energy initially five, capacity five; friendly tower circles recharge one per pulse. |
+| `InfluenceEmitter` | Finite radial territory contribution. Tower radius defaults to 15 + retained stock. |
 
-## Presentation and inspector components
+## Presentation components
 
-| Component | Meaning |
+| Name | Meaning |
 |---|---|
-| `DonutVisual` | Presentation-only crown child. One per actual rawElement unit; rendered with shared Bevy `Torus` mesh. |
-| `Stack`, `StackVisual` | Reusable visual count/layout and its child primitive; used for tower health cubes and deposit donuts. |
-| `TowerBeacon` | Sphere child atop a tower stack, supporting its rawElement donut crown. |
-| `EnergyOrbVisual` | Presentation-only small sphere child. One per actual stored minion energy point. |
-| `SpectatorCamera` | Camera control target. |
-| `StatusText`, `FactionText`, `Control` | Debug HUD labels and clickable controls. |
-| `HudRoot`, `HudTitle`, `DesktopDetail`, `ControlBar` | Responsive UI roles: compact header, hidden small-screen details, and touch-sized control layout. |
-| `InspectorRoot`, `InspectorText`, `InspectorAction` | Inspector panel, details, and navigation/filter controls. |
-| Bevy mesh, material, transform, hierarchy and visibility components | Shared primitive rendering, parent-child lifetime, and display state. |
+| `Stack, StackVisual` | Health cubes or deposit torus counts/layout. |
+| `TowerBeacon` | Sphere child atop tower health stack. |
+| `TowerInfluenceVisual` | Private tower child marking exact faction-colored radius outline; matching EntityKind. |
+| `DonutVisual` | One torus crown child per actual rawElement unit. |
+| `EnergyOrbVisual` | One sphere child per stored minion energy point. |
+| `SpectatorCamera` | Private camera control role. |
+| `StatusText, FactionText, Control` | Private HUD labels and clickable actions. |
+| `HudRoot, HudTitle, DesktopDetail, ControlBar` | Private responsive HUD roles. |
+| `PauseIcon(bool)` | Private rectangular pause/play UI icon pieces. |
+| `HudToggleText` | Private label on standalone Hide HUD / Show HUD control. |
+| `InspectorRoot, InspectorText, InspectorAction` | Inspector panel, live details and controls. |
 
-`VisitedTrails` is private per-minion navigation memory used to avoid following an exhausted trip again.
+Visual components hold no inventory or energy and use Bevy primitive meshes. Child visuals follow parent lifetime; persistent UI survives restart.
 
-## Match resources
+## Resources
 
-| Resource | Meaning |
+| Name | Meaning |
 |---|---|
-| `SimulationConfig` | Default world size, seed, vision, gathering, combat, spawning, trail and energy tuning. |
-| `AttackOrderRequests` | Pending screen-to-world mouse/touch paths consumed by the next simulation step. |
-| `CancelAttackOrderRequests` | Pending right-click ground points used to remove the whole player path when a marker is within two world units. |
-| `AttackPathIds` | Monotonic path ID sequence, grouping attack-trail marker entities into complete strokes. |
-| `DrawingAttackPath` | In-progress mouse or touch stroke and its sampled world points, committed as one path on release. |
-| `TrailTool` | Player-selected Draw or Erase mode for one-finger and left-mouse input. |
-| `CameraGesture` | Two-finger world-space pan and pinch scale queued by input and consumed by camera presentation. |
-| `MatchState` | Pause, speed, hidden-tab, elapsed time, winner and restart request. |
-| `FactionEntities` | Five live faction entity IDs for deterministic ownership lookup. |
-| `RawElementEconomy` | Initial resource total and cumulative spending; verifies that live deposits, cargo and stock plus spending equal the initial total. |
-| `EnergyClock` | Supply pulse accumulator/count. |
-| `InfluenceField` | Bounded influence samples and territory percentages. |
-| `InspectorState`, `InspectorFilter` | Inspector visibility and filters. |
-| `GatheringRuntime`, `RandomStream`, `SpawnSequence` | Seeded exploration and stable spawn/trip ordering. |
-| `SpatialIndex`, `PendingDamage` | Per-step nearby combat lookup and simultaneous resolution of projectile impacts. |
-| `VisualAssets` | Shared primitive meshes and materials; no gameplay inventory. |
+| `SimulationConfig` | World, seed, combat, gathering, trail and energy tuning; tower_influence_radius=15, tower_radius_per_raw=1, drawn_trail_capacity=10, energy_recharge_ticks=5. |
+| `DrawTrailRequests` | Completed ordered world-space strokes queued for placement. |
+| `EraseTrailRequests` | World locations requesting whole player-stroke erasure within two units of marker/segment. |
+| `TrailIds` | Shared next_trip for both producers and next_player_marker serial; reset on restart. |
+| `DrawingTrail` | Private bounded in-progress pointer samples, touch suppression and tool state. |
+| `TrailTool, CameraGesture` | Draw/Erase selection and queued two-finger pan/pinch. |
+| `HudVisibility` | HUD choice retained across restart and orientation changes. |
+| `MatchState, FactionEntities` | Pause/speed/hidden tab/winner/restart/elapsed state and faction IDs. |
+| `RawElementEconomy` | Initial resource total only: remaining + carried + stock = initial. |
+| `EnergyClock` | Simulation-time recharge accumulator and completed pulse count. |
+| `InfluenceField` | Bounded territory samples and percentages; not recharge authority. |
+| `InspectorState, InspectorFilter` | Inspector visibility and filters. |
+| `GatheringRuntime, RandomStream, SpawnSequence` | Private seeded randomness and stable identity allocation; no later minion spawning. |
+| `SpatialIndex, PendingDamage` | Nearby combat lookup and simultaneous projectile impact resolution. |
+| `VisualAssets` | Private shared primitive meshes/materials; no gameplay state. |
 
-Bevy `Time<Fixed>` supplies the 30 Hz step. Gameplay timers use simulation speed and stop when paused, hidden, or won.
+`TrailInputPlugin` in `orders.rs` handles drawings; `GatheringPlugin` handles common trail navigation and decay. Raw samples are bounded; accepted points are at least half vision radius from every accepted point of the same stroke, with no forced endpoint. Separate strokes may overlap. Carriers retain two-unit spacing.
+
+Bevy `Time<Fixed>` supplies 30 Hz steps. Simulation timers scale with speed and stop while paused, hidden or won. Area recharge grants at most one energy per minion per five-second pulse inside any friendly inclusive tower circle, even in contested ground.

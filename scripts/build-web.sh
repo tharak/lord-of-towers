@@ -16,11 +16,11 @@ package_dir="dist/pkg/${BUILD_COMMIT}"
 mkdir -p "$package_dir"
 wasm-bindgen --target web --out-dir "$package_dir" --out-name lord_of_towers target/wasm32-unknown-unknown/release/lord-of-towers.wasm
 cp web/index.html dist/index.html
-BUILD_SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}" python3 - <<'PY'
+python3 - <<'PY'
 import os
 from pathlib import Path
 p = Path('dist/index.html')
-build = os.environ['BUILD_SHA']
+build = os.environ['BUILD_COMMIT']
 p.write_text(p.read_text().replace('__BUILD_SHA__', build[:7]).replace('__BUILD_ID__', build))
 PY
 touch dist/.nojekyll

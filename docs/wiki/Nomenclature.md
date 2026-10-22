@@ -17,6 +17,9 @@
 | production indicator | Primitive marker visible at five available player-tower units. | `ProductionIndicator` |
 | tower | Destructible structure shown by stacked health cubes and beacon sphere. | `Tower` |
 | beacon | Sphere above tower health stack; donuts sit above it. | `TowerBeacon` |
+| drag | Live player control of a minion toward the pointer; release finishes at that target before normal behavior resumes. | `DragControl` / `DragPhase` |
+| leg state | Locomotion animation intent: Idle, Moving, DragStart or DragRelease. | `LegState` |
+| arm state | Independent carrying/shooting flags, simultaneously active when appropriate. | `ArmState` |
 | minion | Mobile combat/gathering unit with local vision, cargo and three equipment slots. | `Minion` |
 | trail | Fading friendly carrier breadcrumb, refreshed within two units; no player drawing. | `Trail` |
 | projectile | Free homing faction-colored shot; damage on impact. | `Projectile` / sphere |

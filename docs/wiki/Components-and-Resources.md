@@ -7,6 +7,8 @@
 | `Faction`, `Allegiance`, `OriginTower` | Faction record, current owner and birth-tower reference. Survivors keep allegiance after origin loss. |
 | `Tower`, `PlayerControlled`, `Minion` | Structure, player faction anchor and mobile unit. |
 | `Name`, `EntityKind`, `MatchEntity`, `SimulationId` | Human name, entity catalog category, restart scope and deterministic simulation identity. |
+| `LegState`, `ArmState` | Legs: Idle, Moving, DragStart throughout held control, DragRelease until arrival. Arms: independent carrying/shooting flags; both can be true. |
+| `DragControl`, `DragPhase` | Ground target and Held/Released phase. Overrides autonomous actions until released arrival within one unit. |
 | `Position`, `Movement` | Ground-plane coordinates, speed and navigation target. |
 | `Health` | Current/max health; equipment preserves health ratio. Towers destroyed at zero. |
 | `Attack`, `ShootingPause` | Damage/range/cooldown and one-second movement pause after a free shot. |
@@ -59,3 +61,5 @@ Fixed steps run at 30 Hz, scale with speed and stop when paused/hidden/won. Inva
 New pickups fill the first empty equipment slot not reserved by an exchange. Otherwise the pickup becomes gathered cargo. ReturnEquipment moves gear into cargo immediately; that cargo may accompany one gathered unit, stays carried if an order is replaced, and is credited to stock only on delivery.
 
 Equipment percentages are fixed: Fire +30% base damage, Water +30% base speed, Earth +30% base maximum health, Air +30% base vision, per equipped copy. Void increases these bonuses by 10% per equipped copy. Birth recipe points remain metadata and do not change these rates. One Fire gives 13 damage; Fire + Void gives 13.3; three Fire gives 19. Bases remain 10 damage, 4 units/s, 30 health and 15 vision.
+
+Pointer input distinguishes tap from drag with an eight-pixel threshold. The real minion follows at current upgraded speed and catches a stationary pointer. Release keeps the last destination. Held drag cancellation handles second fingers, touch cancellation, focus loss and invalid release locations; normal two-finger camera controls remain. Dragging preserves cargo and pending equipment reservations, permits incoming damage and cargo trails, but blocks shooting/gathering/exchanges until completion. Paused input can update intent while movement stays frozen.

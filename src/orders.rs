@@ -44,6 +44,25 @@ impl TouchNavigation {
     }
 }
 
+// Browser touch taps can leave a synthetic mouse hovering over a control. During
+// touch input, hit-test the actual fingers so that hover cannot block the field.
+fn ui_blocks_pointer(
+    interaction: Interaction,
+    touches: &[(u64, Vec2)],
+    touch_mouse_cooldown: bool,
+    bounds: Rect,
+) -> bool {
+    if touch_mouse_cooldown {
+        bounds.width() > 0.0
+            && bounds.height() > 0.0
+            && touches
+                .iter()
+                .any(|(_, position)| bounds.contains(*position))
+    } else {
+        interaction != Interaction::None
+    }
+}
+
 fn pinch_ratio(previous: [Vec2; 2], current: [Vec2; 2]) -> Option<f32> {
     let before = previous[0].distance(previous[1]);
     let after = current[0].distance(current[1]);
@@ -76,7 +95,7 @@ fn gather_pointer_orders(
     touches: Option<Res<Touches>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    interactions: Query<&Interaction>,
+    interactions: Query<(&Interaction, &ComputedNode, &UiGlobalTransform)>,
     inspector: Option<Res<InspectorState>>,
     state: Res<MatchState>,
     tool: Res<TrailTool>,
@@ -116,9 +135,17 @@ fn gather_pointer_orders(
         || state.browser_hidden
         || state.winner.is_some()
         || inspector.is_some_and(|inspector| inspector.open)
-        || interactions
-            .iter()
-            .any(|interaction| *interaction != Interaction::None)
+        || interactions.iter().any(|(interaction, node, transform)| {
+            ui_blocks_pointer(
+                *interaction,
+                &active,
+                drawing.touch_navigation.mouse_cooldown > 0.0,
+                Rect::from_center_size(
+                    transform.translation * node.inverse_scale_factor(),
+                    node.size() * node.inverse_scale_factor(),
+                ),
+            )
+        })
     {
         drawing.pointer = None;
         drawing.points.clear();
@@ -484,6 +511,29 @@ mod tests {
         assert_eq!(w.query::<&Trail>().iter(&w).count(), 1);
         assert!(w.resource::<DrawTrailRequests>().0.is_empty());
     }
+    #[test]
+    fn touch_stroke_ignores_synthetic_ui_hover_but_blocks_actual_ui_touches() {
+        let bounds = Rect::from_center_size(Vec2::new(195.0, 70.0), Vec2::new(80.0, 40.0));
+        let field_touch = [(0, Vec2::new(150.0, 420.0))];
+        assert!(!ui_blocks_pointer(
+            Interaction::Hovered,
+            &field_touch,
+            true,
+            bounds
+        ));
+        // A released field stroke must still finish while the mouse hovers UI.
+        assert!(!ui_blocks_pointer(Interaction::Hovered, &[], true, bounds));
+        let control_touch = [(0, bounds.center())];
+        assert!(ui_blocks_pointer(
+            Interaction::None,
+            &control_touch,
+            true,
+            bounds
+        ));
+        assert!(ui_blocks_pointer(Interaction::Hovered, &[], false, bounds));
+        assert!(!ui_blocks_pointer(Interaction::None, &[], false, bounds));
+    }
+
     #[test]
     fn two_finger_navigation_latches_until_all_fingers_lift() {
         let mut n = TouchNavigation::default();

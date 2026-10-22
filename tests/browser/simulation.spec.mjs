@@ -16,18 +16,32 @@ test('shared trails, tower growth, and centered controls work', async ({ page },
   catch (error) { console.log('Startup error panel:', await page.locator('#error').textContent()); throw error; }
   await expect(page.locator('#loading')).toBeHidden();
   await expect(page.locator('#error')).toBeHidden();
+  // Rendering can finish after gathering has already begun, especially with
+  // software WebGL in CI. Freeze a live snapshot instead of waiting for tick zero.
+  await clickControl(page, status, 'pause');
+  await expect(status).toHaveAttribute('data-paused', 'true');
   await expect(status).toHaveAttribute('data-towers', '5');
   await expect(status).toHaveAttribute('data-player-towers', '1');
-  await expect(status).toHaveAttribute('data-minions', '15');
-  await expect(status).toHaveAttribute('data-raw-deposits', '30');
+  const minions = Number(await status.getAttribute('data-minions'));
+  expect(minions).toBeGreaterThan(0);
+  expect(minions).toBeLessThanOrEqual(15);
+  const deposits = Number(await status.getAttribute('data-raw-deposits'));
+  expect(deposits).toBeGreaterThanOrEqual(0);
+  expect(deposits).toBeLessThanOrEqual(30);
   await expect(status).toHaveAttribute('data-tower-beacons', '5');
   await expect(status).toHaveAttribute('data-recharge-areas', '5');
-  await expect(status).toHaveAttribute('data-max-tower-radius', '15');
-  await expect(status).toHaveAttribute('data-pause-action', 'pause');
+  expect(Number(await status.getAttribute('data-max-tower-radius'))).toBeGreaterThanOrEqual(15);
+  await expect(status).toHaveAttribute('data-pause-action', 'play');
   await expect(status).toHaveAttribute('data-hud-visible', 'true');
   const initialRaw = Number(await status.getAttribute('data-raw-initial'));
   expect(initialRaw).toBeGreaterThanOrEqual(150);
   expect(initialRaw).toBeLessThanOrEqual(300);
+  const startupRaw = await status.evaluate(el =>
+    ['remaining', 'carried', 'stock'].map(key => Number(el.getAttribute('data-raw-' + key)))
+  );
+  expect(startupRaw.reduce((sum, amount) => sum + amount, 0)).toBe(initialRaw);
+  await clickControl(page, status, 'pause');
+  await expect(status).toHaveAttribute('data-paused', 'false');
 
   await page.mouse.click(720, 450);
   await expect(status).toHaveAttribute('data-drawn-trails', '1');

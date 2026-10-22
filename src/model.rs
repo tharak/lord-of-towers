@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::VecDeque;
 
 pub const FACTION_NAMES: [&str; 5] = [
     "Orthanc",
@@ -43,7 +44,7 @@ pub enum EntityKind {
     Faction,
     Tower,
     Minion,
-    RawElementDeposit,
+    ElementDeposit,
     Trail,
     DonutVisual,
     EnergyOrbVisual,
@@ -90,7 +91,6 @@ pub struct SimulationConfig {
     pub half_extent: f32,
     pub starting_minions: usize,
     pub tower_influence_radius: f32,
-    pub tower_radius_per_raw: f32,
     pub drawn_trail_capacity: usize,
     pub minion_speed: f32,
     pub minion_health: f32,
@@ -116,7 +116,6 @@ impl Default for SimulationConfig {
             half_extent: 50.0,
             starting_minions: 3,
             tower_influence_radius: 15.0,
-            tower_radius_per_raw: 1.0,
             drawn_trail_capacity: 10,
             minion_speed: 4.0,
             minion_health: 30.0,
@@ -173,7 +172,7 @@ pub enum SimSet {
     Combat,
     Capture,
     Gathering,
-    TowerGrowth,
+    Production,
     Energy,
     Influence,
     Victory,
@@ -204,11 +203,106 @@ pub struct EnergyProjectile {
     pub remaining: f32,
 }
 
-/// Gameplay inventory: deposits, minion cargo (0..=1), or tower stock.
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct RawElement(pub u32);
+/// Resource type; ordering is shared by inventory counts and economy totals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(usize)]
+pub enum Element {
+    Fire,
+    Water,
+    Earth,
+    Air,
+    Void,
+}
+impl Element {
+    pub const ALL: [Self; 5] = [Self::Fire, Self::Water, Self::Earth, Self::Air, Self::Void];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Fire => "Fire",
+            Self::Water => "Water",
+            Self::Earth => "Earth",
+            Self::Air => "Air",
+            Self::Void => "Void",
+        }
+    }
+    pub fn color(self) -> Color {
+        match self {
+            Self::Fire => Color::srgb(1.0, 0.0, 0.0),
+            Self::Water => Color::srgb(0.0, 0.0, 1.0),
+            Self::Earth => Color::srgb(1.0, 1.0, 0.0),
+            Self::Air => Color::srgb(0.0, 1.0, 0.0),
+            Self::Void => Color::BLACK,
+        }
+    }
+}
+pub const ELEMENTS_PER_MINION: usize = 5;
+
+/// One canonical ordered inventory: deposit units, minion cargo (0..=1), or tower stock.
+#[derive(Component, Clone, Debug, Default)]
+pub struct ElementInventory {
+    pub units: VecDeque<Element>,
+}
+impl ElementInventory {
+    pub fn homogeneous(element: Element, amount: u32) -> Self {
+        Self {
+            units: std::iter::repeat_n(element, amount as usize).collect(),
+        }
+    }
+    pub fn total(&self) -> usize {
+        self.units.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.units.is_empty()
+    }
+    pub fn counts(&self) -> [u32; 5] {
+        let mut counts = [0; 5];
+        for element in &self.units {
+            counts[*element as usize] += 1;
+        }
+        counts
+    }
+}
 #[derive(Component, Clone, Copy, Debug)]
-pub struct RawElementDeposit;
+pub struct ElementDeposit;
+
+/// Elemental points belong to a minion, independently of its carried inventory.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ElementStats {
+    pub fire: u32,
+    pub water: u32,
+    pub earth: u32,
+    pub air: u32,
+    pub void: u32,
+}
+impl Default for ElementStats {
+    fn default() -> Self {
+        Self {
+            fire: 2,
+            water: 2,
+            earth: 2,
+            air: 2,
+            void: 2,
+        }
+    }
+}
+impl ElementStats {
+    pub fn from_recipe(recipe: impl IntoIterator<Item = Element>) -> Self {
+        let mut stats = Self::default();
+        for element in recipe {
+            match element {
+                Element::Fire => stats.fire += 1,
+                Element::Water => stats.water += 1,
+                Element::Earth => stats.earth += 1,
+                Element::Air => stats.air += 1,
+                Element::Void => stats.void += 1,
+            }
+        }
+        stats
+    }
+    /// Additive ten-percent base-stat bonuses, amplified by void points.
+    pub fn multiplier(&self, level: u32) -> f32 {
+        1.0 + 0.10 * level as f32 * (1.0 + 0.10 * self.void as f32)
+    }
+}
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Vision {
     pub radius: f32,
@@ -291,8 +385,9 @@ pub struct TrailEmitter {
     pub last_position: Vec2,
 }
 #[derive(Resource, Clone, Copy, Debug, Default)]
-pub struct RawElementEconomy {
-    pub initial: u32,
+pub struct ElementEconomy {
+    pub initial: [u32; 5],
+    pub consumed: [u32; 5],
 }
 
 #[derive(Resource, Debug, Default)]

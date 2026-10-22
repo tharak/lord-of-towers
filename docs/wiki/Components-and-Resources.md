@@ -7,7 +7,7 @@
 | `Name, EntityKind, MatchEntity` | Application identity, category and restart lifetime. |
 | `SimulationId` | Stable match-local tie ordering, distinct from Bevy entity IDs. |
 | `Faction, Allegiance` | Faction record and owner reference. |
-| `Tower, Minion, RawElementDeposit` | Gameplay roles. Five towers and fifteen initial minions; no later spawning. |
+| `Tower, Minion, ElementDeposit` | Gameplay roles. Five towers, fifteen initial minions, and later minions from five-unit recipes. |
 | `PlayerControlled` | Orthanc alone accepts new player drawings; control never transfers after its loss. |
 | `OriginTower` | Initial creator reference, validated before use; origin death does not destroy a minion. |
 | `Position, Health, Movement` | X/Z ground position, health, steering speed and target. |
@@ -15,15 +15,16 @@
 | `CombatTarget` | Enemy selected for shared movement/firing decisions each tick. |
 | `TowerDefenseTarget` | Defended tower and firing attacker; valid only while the attacker is visible and both references remain valid. |
 | `EnergyProjectile` | Live hostile target, damage, speed and remaining flight lifetime; damage on impact. |
-| `RawElement` | Finite deposit quantity, cargo 0–1, or retained tower stock. No visual child holds it. |
-| `Vision` | Inclusive local detection circle, default 15. |
+| `ElementInventory` | Ordered typed units (VecDeque): homogeneous deposits, cargo 0–1, or FIFO tower stock. No visual child holds it. |
+| `ElementStats` | Fire/water/earth/air/void numeric points. Start at two; newborn recipes add matching points. Fire damage, water speed, earth max health, air vision; base multiplier = 1 + 0.10 × matching stat × (1 + 0.10 × void). |
+| `Vision` | Inclusive local detection circle, base 15, initially 18.6 from air/void bonuses. |
 | `GatheringState` | Exploring, Following { trip, sequence }, or Returning { tower }. |
 | `Trail` | Shared carrier/player trip, path sequence and remaining lifetime, default 30 seconds. Highest remaining lifetime wins navigation selection. |
 | `TrailEmitter` | Carrier trip, next sequence and last marker position; emission spacing two. |
 | `PlayerDrawnTrail` | Serial provenance for the ten-marker global budget and whole-stroke erase; no separate navigation behavior. |
 | `VisitedTrailMarkers` | Private per-minion reached-marker identities, preventing repeat visits; pruned when markers disappear. |
 | `EnergyStore` | Combat energy initially five, capacity five; friendly tower circles recharge one per pulse. |
-| `InfluenceEmitter` | Finite radial territory contribution. Tower radius defaults to 15 + retained stock. |
+| `InfluenceEmitter` | Finite radial territory contribution. Tower radius stays fixed at default 15. |
 
 ## Presentation components
 
@@ -32,7 +33,7 @@
 | `Stack, StackVisual` | Health cubes or deposit torus counts/layout. |
 | `TowerBeacon` | Sphere child atop tower health stack. |
 | `TowerInfluenceVisual` | Private tower child marking exact faction-colored radius outline; matching EntityKind. |
-| `DonutVisual` | One torus crown child per actual rawElement unit. |
+| `DonutVisual` | One torus crown child per actual element unit. |
 | `EnergyOrbVisual` | One sphere child per stored minion energy point. |
 | `SpectatorCamera` | Private camera control role. |
 | `StatusText, FactionText, Control` | Private HUD labels and clickable actions. |
@@ -47,7 +48,7 @@ Visual components hold no inventory or energy and use Bevy primitive meshes. Chi
 
 | Name | Meaning |
 |---|---|
-| `SimulationConfig` | World, seed, combat, gathering, trail and energy tuning; tower_influence_radius=15, tower_radius_per_raw=1, drawn_trail_capacity=10, energy_recharge_ticks=5. |
+| `SimulationConfig` | World, seed, combat, gathering, trail and energy tuning; tower_influence_radius=15, drawn_trail_capacity=10, energy_recharge_ticks=5. |
 | `DrawTrailRequests` | Completed ordered world-space strokes queued for placement. |
 | `EraseTrailRequests` | World locations requesting whole player-stroke erasure within two units of marker/segment. |
 | `TrailIds` | Shared next_trip for both producers and next_player_marker serial; reset on restart. |
@@ -55,11 +56,11 @@ Visual components hold no inventory or energy and use Bevy primitive meshes. Chi
 | `TrailTool, CameraGesture` | Draw/Erase selection and queued two-finger pan/pinch. |
 | `HudVisibility` | HUD choice retained across restart and orientation changes. |
 | `MatchState, FactionEntities` | Pause/speed/hidden tab/winner/restart/elapsed state and faction IDs. |
-| `RawElementEconomy` | Initial resource total only: remaining + carried + stock = initial. |
+| `ElementEconomy` | Per-element initial and consumed arrays: deposits + carried + stock + consumed = initial. |
 | `EnergyClock` | Simulation-time recharge accumulator and completed pulse count. |
 | `InfluenceField` | Bounded territory samples and percentages; not recharge authority. |
 | `InspectorState, InspectorFilter` | Inspector visibility and filters. |
-| `GatheringRuntime, RandomStream, SpawnSequence` | Private seeded randomness and stable identity allocation; no later minion spawning. |
+| `GatheringRuntime, RandomStream, SpawnSequence` | Private seeded randomness and stable identity allocation; stable IDs also cover element-funded births. |
 | `PendingTowerAlerts` | Tower/attacker shot records, consumed after firing each tick; alerts friendly minions inside influence that can see the attacker. Cleared on restart. |
 | `SpatialIndex, PendingDamage` | Nearby combat lookup and simultaneous projectile impact resolution. |
 | `VisualAssets` | Private shared primitive meshes/materials; no gameplay state. |
@@ -69,3 +70,5 @@ Visual components hold no inventory or energy and use Bevy primitive meshes. Chi
 Bevy `Time<Fixed>` supplies 30 Hz steps. Simulation timers scale with speed and stop while paused, hidden or won. Area recharge grants at most one energy per minion per five-second pulse inside any friendly inclusive tower circle, even in contested ground.
 
 Movement priorities are tower defense, cargo return, closest visible enemy, visible deposit, freshest unvisited friendly trail, then exploration. Carriers may shoot enemies already in range but chase only for valid tower defense. Insufficient energy skips combat pursuit. Defense ends when the attacker leaves vision or the defended tower/attacker becomes invalid.
+
+`Element` is the ordered Fire/red, Water/blue, Earth/yellow, Air/green, Void/black enum. `ELEMENTS_PER_MINION` is five. Production runs after delivery and before recharge, consuming FIFO units and spawning a fully healthy minion with default stats plus recipe counts. Existing minions are unchanged.

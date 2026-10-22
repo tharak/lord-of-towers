@@ -320,11 +320,11 @@ pub(crate) fn clean_trail_memory(world: &mut World) {
         .query::<(&mut GatheringState, &mut Movement)>()
         .iter_mut(world)
     {
-        if let GatheringState::Following { trip, sequence } = *state {
-            if !live.contains(&(trip, sequence)) {
-                *state = GatheringState::Exploring;
-                movement.retarget_in = 0.0;
-            }
+        if let GatheringState::Following { trip, sequence } = *state
+            && !live.contains(&(trip, sequence))
+        {
+            *state = GatheringState::Exploring;
+            movement.retarget_in = 0.0;
         }
     }
 }

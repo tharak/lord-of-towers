@@ -1,5 +1,7 @@
 //! Primitive-only presentation. Gameplay never depends on these mesh dimensions.
-use crate::{influence::InfluenceField, inspector::InspectorState, model::*};
+#[cfg(target_arch = "wasm32")]
+use crate::inspector::InspectorState;
+use crate::{influence::InfluenceField, model::*};
 use bevy::{camera::ScalingMode, mesh::VertexAttributeValues, prelude::*};
 
 pub struct PresentationPlugin;

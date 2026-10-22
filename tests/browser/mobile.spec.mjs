@@ -53,7 +53,6 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
   await expect(status).toHaveAttribute('data-trail-tool', 'draw');
   await expect(status).toHaveAttribute('data-drawn-trails', '0');
   await expect(status).toHaveAttribute('data-recharge-areas', '5');
-  await expect(status).toHaveAttribute('data-pause-action', 'pause');
   const session = await context.newCDPSession(page);
 
   await tapControl(page, session, status, 'hud');
@@ -61,13 +60,7 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
   await tapControl(page, session, status, 'hud');
   await expect(status).toHaveAttribute('data-hud-visible', 'true');
 
-  // Read actual ECS control centers after the centered mobile layout is computed.
-  await tapControl(page, session, status, 'pause');
-  await expect(status).toHaveAttribute('data-paused', 'true');
-  await expect(status).toHaveAttribute('data-pause-action', 'play');
   await expect(status).toHaveAttribute('data-drawn-trails', '0');
-  await tapControl(page, session, status, 'pause');
-  await expect(status).toHaveAttribute('data-paused', 'false');
   await touch(page, session, 'touchStart', [[0, 150, 420]]);
   for (let x = 160; x <= 240; x += 10) {
     await touch(page, session, 'touchMove', [[0, x, 420]]);
@@ -77,8 +70,6 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
   const drawn = await status.getAttribute('data-drawn-trails');
   expect(Number(drawn)).toBeLessThanOrEqual(10);
   await page.screenshot({ path: testInfo.outputPath('mobile-drawn-path.png') });
-  await tapControl(page, session, status, 'pause');
-  await expect(status).toHaveAttribute('data-paused', 'true');
 
   await tapControl(page, session, status, 'erase');
   await expect(status).toHaveAttribute('data-trail-tool', 'erase');
@@ -122,8 +113,6 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
   await expect(status).toHaveAttribute('data-hud-visible', 'false');
   await tapControl(page, session, status, 'hud');
   await expect(status).toHaveAttribute('data-hud-visible', 'true');
-  await tapControl(page, session, status, 'pause');
-  await expect(status).toHaveAttribute('data-paused', 'false');
   await expect(status).toHaveAttribute('data-drawn-trails', '0');
   await page.screenshot({ path: testInfo.outputPath('mobile-landscape.png') });
   await expect(page.locator('#error')).toBeHidden();

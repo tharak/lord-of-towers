@@ -6,7 +6,7 @@
 | inventory | Ordered deque of actual units in deposit, cargo, tower stock or reservation. | `ElementInventory` |
 | donut | Visible stock, cargo or deposit unit. | `DonutVisual` / stack child |
 | torus | Bevy primitive mesh used to render a donut. Not a resource type. | `Torus` |
-| cargo | One gathered element being carried to a tower. | Minion `ElementInventory` |
+| cargo | Gathered overflow element or unequipped units being carried home. | Minion `ElementInventory` |
 | equipment | Up to three individually slotted elements, duplicates allowed; activates birth-stat bonuses. | `EquippedElements` |
 | equipment sphere | Colored visual for one equipped slot; separate from cargo crown. | `EquippedElementVisual` / sphere |
 | elemental stat | Permanent numeric birth point, initially two each plus recipe counts; not an inventory unit. | `ElementStats` |

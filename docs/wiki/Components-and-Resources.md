@@ -33,7 +33,7 @@ Fire modifies damage, water speed, earth maximum health, air vision. Attribute m
 | `EquippedElementVisual` | Typed sphere for occupied gear slot, up to three; no inventory authority. |
 | `TowerBeacon`, `TowerInfluenceVisual`, `ProductionIndicator` | Beacon sphere, radius outline and five-available-unit player production marker. |
 | `HudRoot`, `HudTitle`, `DesktopDetail`, `ControlBar`, `PauseIcon`, `HudToggleText` | Responsive hideable HUD, five bottom controls, shape-based pause/play symbols and persistent toggle. |
-| `ContextPanel`, contextual action buttons/text | Transient selected minion equipment or tower recipe controls. Tracks world entity, fits viewport, removed on deselection/death/restart. Closing does not cancel orders. |
+| `ContextPanel`, contextual action buttons/text | Transient selected minion equipment (three rows of five element buttons) or tower recipe controls. Equipped buttons are outlined; clicking one moves it immediately into cargo for homeward delivery. Tracks world entity, fits viewport, removed on deselection/death/restart. Closing does not cancel orders. |
 
 All visuals use Bevy primitive meshes and derive from authoritative gameplay state. Child visuals disappear with parents; infrastructure persists across restart.
 
@@ -55,3 +55,5 @@ All visuals use Bevy primitive meshes and derive from authoritative gameplay sta
 Fixed steps run at 30 Hz, scale with speed and stop when paused/hidden/won. Invalid-order reservation cleanup also runs outside simulation gating. Restart clears match-scoped entities, commands and selection. Equipment transfers happen before NPC production. Player production is explicit; NPCs fill nearby empty slots before consuming five FIFO stock units. Destruction drops cargo/equipment and reservations at recorded source position; cancellation refunds living source stock.
 
 `PlayerInteractionPlugin` replaces all drawing/erasing. Carrier-only trails retain local freshness navigation. Combat prioritizes visible tower defense, then homeward orders/cargo, then visible enemy pursuit, deposits, trails and exploration. Returning units shoot in-range enemies without chasing. No energy component, clock, cost or recharge remains.
+
+New pickups fill the first empty equipment slot not reserved by an exchange. Otherwise the pickup becomes gathered cargo. ReturnEquipment moves gear into cargo immediately; that cargo may accompany one gathered unit, stays carried if an order is replaced, and is credited to stock only on delivery.

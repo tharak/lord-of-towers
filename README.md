@@ -10,7 +10,9 @@ A Rust + Bevy ECS strategy simulation built entirely from Bevy primitive meshes.
 
 Five towers begin with three empty-equipped minions each. You control Orthanc's orange faction. Minions gather finite elements and fight visible enemies. Towers are destroyed at zero health and drop their stock; the last surviving tower wins.
 
-Click or tap a friendly minion to open its contextual panel. Select one of three equipment slots and choose an element available at the nearest friendly tower. The unit is reserved immediately; the minion travels home to exchange equipment. Duplicate elements are allowed. Separate actions deliver gathered cargo, return the selected equipped unit, or cancel a pending order. Closing the panel keeps accepted orders. Players no longer draw or erase trails.
+Click or tap a friendly minion to open a compact grid: three equipment rows, with Fire, Water, Earth, Air and Void buttons in each. A stocked element is enabled on every row. The equipped element has a white outline; clicking it immediately unequips it into cargo for delivery home. Click another available element to request that slot's replacement from the nearest tower. Its stock is reserved immediately and the minion travels home. Changing a choice replaces the pending order. Closing the panel keeps accepted orders. Players no longer draw or erase trails.
+
+Newly gathered elements automatically fill the first empty equipment slot (duplicates allowed). A slot reserved for an incoming tower exchange is skipped. Once no unreserved slot is empty, pickups become cargo and return to the tower. Returned equipment travels as cargo too and may accompany a gathered unit.
 
 Click your tower to select a birth recipe using the element +/− buttons. Exactly five available units create one minion. A primitive marker above the tower indicates that at least five unreserved units are available. NPC towers equip empty slots on nearby minions before automatically consuming the oldest five remaining units to produce minions.
 

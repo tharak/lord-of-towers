@@ -26,7 +26,7 @@ Application entities have `Name` and `EntityKind`. Simulation entities have `Mat
 
 The five bottom controls are pause/play, 1×, 2×, 4× and restart. `HudRoot`, `HudTitle`, `DesktopDetail`, `ControlBar`, `PauseIcon` and `HudToggleText` are presentation roles. `HudVisibility` survives restart/rotation; its toggle remains accessible when hidden. F3 opens the inspector.
 
-`ContextPanel` is transient UI beside the selected friendly minion or tower. Its contextual button/text children are `Ui` entities. Selection/state changes rebuild the panel; deselection, unit destruction or restart removes it. It is independent of persistent HUD visibility. Closing the panel never cancels an accepted tower order. Two fingers pan/pinch; world clicks select units, never draw trails.
+`ContextPanel` is transient UI beside the selected friendly minion or tower. It contains exactly three rows of five element buttons for minions, with stocked choices enabled in each row and equipped choices outlined; tower recipe controls are unchanged. Clicking an equipped choice immediately moves the unit into cargo for homeward delivery; pickups fill empty unreserved equipment slots first. Its contextual button/text children are `Ui` entities. Selection/state changes rebuild the panel; deselection, unit destruction or restart removes it. It is independent of persistent HUD visibility. Closing the panel never cancels an accepted tower order. Two fingers pan/pinch; world clicks select units, never draw trails.
 
 ## Shared state and rules
 

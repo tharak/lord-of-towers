@@ -6,7 +6,7 @@ A Rust/Bevy ECS strategy simulation using only engine primitive meshes. [Play in
 - [Entities](Entities): every entity kind and lifecycle.
 - [Components and Resources](Components-and-Resources): shared ECS contracts.
 
-You control Orthanc. Select a friendly minion to equip up to three physical elements from tower stock, return equipment or deliver cargo. Exchanges reserve stock immediately and require traveling home. Select the player tower to spend exactly five chosen units on a new empty-equipped minion. A sphere indicates five available units. NPCs auto-equip nearby empty slots before automatic FIFO births.
+You control Orthanc. Select a friendly minion for three rows of five element buttons. Stocked types are enabled in all rows; an outlined equipped button immediately unequips that unit into cargo for delivery home. Pickups fill empty unreserved equipment slots automatically. Exchanges reserve stock immediately and require traveling home. Select the player tower to spend exactly five chosen units on a new empty-equipped minion. A sphere indicates five available units. NPCs auto-equip nearby empty slots before automatic FIFO births.
 
 Permanent birth stats start at two each; recipes add matching points. Equipped fire/water/earth/air activate damage/speed/health/vision bonuses and equipped void amplifies them. Duplicate gear is allowed. Element-colored spheres mean equipment; donut crowns mean cargo/stock. Shooting is free, pauses movement for one second, and damages on projectile impact. There is no energy reserve/recharge or player trail drawing.
 

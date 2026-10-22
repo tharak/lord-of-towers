@@ -53,6 +53,8 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
   await tap(page, session, 390 * 0.125, 844 - 84);
   await expect(status).toHaveAttribute('data-paused', 'true');
   await expect(status).toHaveAttribute('data-attack-trails', '0');
+  await tap(page, session, 390 * 0.125, 844 - 84);
+  await expect(status).toHaveAttribute('data-paused', 'false');
   await touch(page, session, 'touchStart', [[0, 150, 420]]);
   for (let x = 160; x <= 240; x += 10) {
     await touch(page, session, 'touchMove', [[0, x, 420]]);
@@ -61,6 +63,8 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
   await expect.poll(async () => Number(await status.getAttribute('data-attack-trails'))).toBeGreaterThan(1);
   const drawn = await status.getAttribute('data-attack-trails');
   await page.screenshot({ path: testInfo.outputPath('mobile-drawn-path.png') });
+  await tap(page, session, 390 * 0.125, 844 - 84);
+  await expect(status).toHaveAttribute('data-paused', 'true');
 
   await tap(page, session, 390 * 0.625, 844 - 84);
   await expect(status).toHaveAttribute('data-trail-tool', 'erase');

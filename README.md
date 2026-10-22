@@ -14,7 +14,7 @@ Click or tap a friendly minion to open a compact grid: three equipment rows, wit
 
 Newly gathered elements automatically fill the first empty equipment slot (duplicates allowed). A slot reserved for an incoming tower exchange is skipped. Once no unreserved slot is empty, pickups become cargo and return to the tower. Returned equipment travels as cargo too and may accompany a gathered unit.
 
-Click your tower to select a birth recipe using the element +/− buttons. Exactly five available units create one minion. A primitive marker above the tower indicates that at least five unreserved units are available. NPC towers equip empty slots on nearby minions before automatically consuming the oldest five remaining units to produce minions.
+Click your tower for one row of five element buttons matching the minion panel. Each click selects one available unit and the button shows its selected count. The fifth selection automatically creates a minion and clears the recipe; there is no separate Create button. A primitive marker above the tower indicates that at least five unreserved units are available. NPC towers equip empty slots on nearby minions before automatically consuming the oldest five remaining units to produce minions.
 
 Two fingers pan and pinch to zoom. WASD/arrow keys pan and +/− zoom. Space pauses, 1/2/3 select 1×/2×/4× speed, R restarts, and F3 opens the live ECS inspector. The centered bottom bar contains pause/play symbols, three speeds and restart. The top-right Hide HUD / Show HUD button retains its setting through restart and screen rotation. The web game supports portrait and landscape without page scrolling. Hidden browser tabs suspend simulation.
 

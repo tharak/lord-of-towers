@@ -16,8 +16,10 @@ enum ContextAction {
         command: PlayerCommand,
         cancel: bool,
     },
-    Recipe(usize, bool),
-    Command(PlayerCommand),
+    Recipe {
+        tower: Entity,
+        element: Element,
+    },
 }
 #[derive(Resource, Default)]
 struct PanelCache(String);
@@ -174,6 +176,7 @@ fn context_actions(
     mut selection: ResMut<PlayerSelection>,
     mut commands: ResMut<PlayerCommands>,
     state: Res<MatchState>,
+    towers: Query<(&ElementInventory, &Health), With<Tower>>,
 ) {
     if state.restart_requested || state.browser_hidden || state.winner.is_some() {
         return;
@@ -195,14 +198,33 @@ fn context_actions(
                 }
                 commands.0.push(command.clone());
             }
-            ContextAction::Recipe(index, add) => {
-                if *add {
-                    selection.recipe[*index] += 1;
-                } else {
-                    selection.recipe[*index] = selection.recipe[*index].saturating_sub(1);
+            ContextAction::Recipe { tower, element } => {
+                if selection.entity != Some(*tower) {
+                    continue;
+                }
+                let Ok((inventory, health)) = towers.get(*tower) else {
+                    continue;
+                };
+                if health.current <= 0.0 {
+                    continue;
+                }
+                let stock = recipe_stock(inventory, *tower, &commands);
+                for (selected, available) in selection.recipe.iter_mut().zip(stock) {
+                    *selected = (*selected).min(available);
+                }
+                let index = *element as usize;
+                if selection.recipe[index] >= stock[index] {
+                    continue;
+                }
+                selection.recipe[index] += 1;
+                if selection.recipe.iter().sum::<u32>() == ELEMENTS_PER_MINION as u32 {
+                    commands.0.push(PlayerCommand::CreateMinion {
+                        tower: *tower,
+                        counts: selection.recipe,
+                    });
+                    selection.recipe = [0; 5];
                 }
             }
-            ContextAction::Command(command) => commands.0.push(command.clone()),
         }
     }
 }
@@ -220,9 +242,31 @@ fn row(label: impl Into<String>, action: Option<ContextAction>) -> Row {
     }
 }
 
+// Queued births also claim stock while simulation is paused or between fixed ticks.
+fn recipe_stock(
+    inventory: &ElementInventory,
+    tower: Entity,
+    commands: &PlayerCommands,
+) -> [u32; 5] {
+    let mut stock = inventory.counts();
+    for command in &commands.0 {
+        if let PlayerCommand::CreateMinion {
+            tower: source,
+            counts,
+        } = command
+            && *source == tower
+        {
+            for (available, selected) in stock.iter_mut().zip(counts) {
+                *available = available.saturating_sub(*selected);
+            }
+        }
+    }
+    stock
+}
+
 fn context_panel(world: &mut World) {
     let selected = world.resource::<PlayerSelection>().entity;
-    let recipe = world.resource::<PlayerSelection>().recipe;
+    let mut recipe = world.resource::<PlayerSelection>().recipe;
     let owner = world
         .query_filtered::<&Allegiance, (With<Tower>, With<PlayerControlled>)>()
         .iter(world)
@@ -236,9 +280,7 @@ fn context_panel(world: &mut World) {
     if selected != valid {
         world.resource_mut::<PlayerSelection>().entity = valid;
     }
-    let mut rows = Vec::new();
-    let mut equipment_rows = Vec::new();
-    let mut heading = String::new();
+    let mut element_rows = Vec::new();
     let mut anchor = Vec2::ZERO;
     let mut viewport = Vec2::new(320.0, 640.0);
     if let Some(entity) = valid {
@@ -260,40 +302,31 @@ fn context_panel(world: &mut World) {
                 .unwrap_or(viewport * 0.5);
         }
         if world.get::<Tower>(entity).is_some() {
-            heading = "Tower stock / Create minion".into();
             let stock = world
                 .get::<ElementInventory>(entity)
-                .map_or([0; 5], ElementInventory::counts);
-            let total: u32 = recipe.iter().sum();
-            for element in Element::ALL {
-                let i = element as usize;
-                rows.push(row(
-                    format!(
-                        "{}: {} stock | {} selected",
-                        element.name(),
-                        stock[i],
-                        recipe[i]
-                    ),
-                    None,
-                ));
-                rows.push(row(
-                    format!("− {}", element.name()),
-                    (recipe[i] > 0).then_some(ContextAction::Recipe(i, false)),
-                ));
-                rows.push(row(
-                    format!("+ {}", element.name()),
-                    (total < 5 && recipe[i] < stock[i]).then_some(ContextAction::Recipe(i, true)),
-                ));
+                .map_or([0; 5], |inventory| {
+                    recipe_stock(inventory, entity, world.resource::<PlayerCommands>())
+                });
+            for (selected, available) in recipe.iter_mut().zip(stock) {
+                *selected = (*selected).min(available);
             }
-            rows.push(row(
-                format!("Create ({total}/5)"),
-                (total == 5 && (0..5).all(|i| recipe[i] <= stock[i])).then_some(
-                    ContextAction::Command(PlayerCommand::CreateMinion {
-                        tower: entity,
-                        counts: recipe,
-                    }),
-                ),
-            ));
+            world.resource_mut::<PlayerSelection>().recipe = recipe;
+            let choices = Element::ALL
+                .into_iter()
+                .map(|element| {
+                    let index = element as usize;
+                    let mut choice = row(
+                        format!("{}\n{}", element.name(), recipe[index]),
+                        (recipe[index] < stock[index]).then_some(ContextAction::Recipe {
+                            tower: entity,
+                            element,
+                        }),
+                    );
+                    choice.color = element.color();
+                    (choice, recipe[index] > 0)
+                })
+                .collect();
+            element_rows.push(choices);
         } else {
             let gear = world
                 .get::<EquippedElements>(entity)
@@ -341,28 +374,20 @@ fn context_panel(world: &mut World) {
                     choice.color = element.color();
                     choices.push((choice, equipped));
                 }
-                equipment_rows.push(choices);
+                element_rows.push(choices);
             }
         }
     }
     let signature = format!(
-        "{valid:?}:{recipe:?}:{heading}:{:?}:{}",
-        equipment_rows
+        "{valid:?}:{recipe:?}:{}",
+        element_rows
             .iter()
             .flatten()
-            .map(|(r, equipped)| format!("{}:{:?}:{equipped}", r.label, r.action))
-            .collect::<String>(),
-        rows.iter()
-            .map(|r| format!("{}:{:?}", r.label, r.action))
+            .map(|(r, selected)| format!("{}:{:?}:{selected}", r.label, r.action))
             .collect::<String>()
     );
     let width = 252.0_f32.min((viewport.x - 16.0).max(1.0));
-    let row_height = ((viewport.y - 70.0) / rows.len().max(1) as f32 - 3.0).clamp(14.0, 26.0);
-    let height = if equipment_rows.is_empty() {
-        (rows.len() as f32 * (row_height + 3.0) + 42.0).min((viewport.y - 16.0).max(1.0))
-    } else {
-        138.0
-    };
+    let height = 12.0 + element_rows.len() as f32 * 43.0 - 3.0;
     let left =
         (anchor.x + 20.0).clamp(8.0_f32.min(viewport.x), (viewport.x - width - 8.0).max(8.0));
     let top = (anchor.y - height * 0.5).clamp(
@@ -414,11 +439,11 @@ fn context_panel(world: &mut World) {
             BackgroundColor(Color::srgba(0.035, 0.045, 0.065, 0.97)),
         ))
         .with_children(|panel| {
-            for (slot, choices) in equipment_rows.into_iter().enumerate() {
+            for (slot, choices) in element_rows.into_iter().enumerate() {
                 panel
                     .spawn((
                         EntityKind::Ui,
-                        Name::new(format!("Equipment slot {}", slot + 1)),
+                        Name::new(format!("Element row {}", slot + 1)),
                         Node {
                             width: percent(100),
                             min_height: px(40),
@@ -432,7 +457,7 @@ fn context_panel(world: &mut World) {
                             let enabled = choice.action.is_some();
                             let mut button = strip.spawn((
                                 EntityKind::Ui,
-                                Name::new(format!("Slot {} {}", slot + 1, choice.label)),
+                                Name::new(format!("Element row {} {}", slot + 1, choice.label)),
                                 Node {
                                     flex_basis: px(0),
                                     flex_grow: 1.0,
@@ -456,7 +481,7 @@ fn context_panel(world: &mut World) {
                             button.with_children(|button| {
                                 button.spawn((
                                     EntityKind::Ui,
-                                    Name::new("Equipment element label"),
+                                    Name::new("Element choice label"),
                                     Text::new(choice.label),
                                     TextFont {
                                         font_size: FontSize::Px(11.0),
@@ -471,55 +496,6 @@ fn context_panel(world: &mut World) {
                             });
                         }
                     });
-            }
-            if !heading.is_empty() {
-                panel.spawn((
-                    EntityKind::Ui,
-                    Name::new("Selection heading"),
-                    Text::new(heading),
-                    TextFont {
-                        font_size: FontSize::Px(14.0),
-                        ..default()
-                    },
-                ));
-            }
-            for row in rows {
-                let enabled = row.action.is_some();
-                let mut item = panel.spawn((
-                    EntityKind::Ui,
-                    Name::new("Selection action"),
-                    Node {
-                        min_height: px(row_height),
-                        flex_shrink: 0.0,
-                        padding: UiRect::axes(px(6), px(0)),
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(if enabled {
-                        row.color
-                    } else {
-                        Color::srgb(0.075, 0.085, 0.10)
-                    }),
-                ));
-                if let Some(action) = row.action {
-                    item.insert((Button, action));
-                }
-                item.with_children(|button| {
-                    button.spawn((
-                        EntityKind::Ui,
-                        Name::new("Selection action label"),
-                        Text::new(row.label),
-                        TextFont {
-                            font_size: FontSize::Px((row_height - 3.0).clamp(10.0, 12.0)),
-                            ..default()
-                        },
-                        TextColor(if enabled {
-                            Color::WHITE
-                        } else {
-                            Color::srgb(0.55, 0.58, 0.62)
-                        }),
-                    ));
-                });
             }
         });
 }

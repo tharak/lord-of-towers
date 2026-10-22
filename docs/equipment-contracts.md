@@ -18,8 +18,8 @@ Changing a grid choice cancels the previous order before requesting the new one.
 
 Only NPC towers automatically equip empty slots on nearby allied minions, oldest units first, before automatic production. They never replace existing equipment automatically. NPC births consume the oldest five remaining stock units.
 
-The player chooses exactly five available units in the tower panel. Confirmation validates live stock before consuming the oldest units matching the selected counts, preserving remaining FIFO order. Consumed counts update `ElementEconomy`; newborn birth stats use that recipe and equipment is empty.
+The player selects units through one row of five element buttons matching the minion panel. Each click adds one available unit; the fifth selection automatically queues creation and clears the recipe. Each button shows its selected count, and unavailable types are disabled. Queued births are subtracted from selectable stock even while paused. Creation validates live stock before consuming the oldest units matching the selected counts, preserving remaining FIFO order. Consumed counts update `ElementEconomy`; newborn birth stats use that recipe and equipment is empty.
 
 For each type: deposits + cargo + stock + equipped + reserved + consumed = initial. Visual children store no resources. Compilation is the only validation; no tests or runtime checks are added.
 
-The minion panel is exactly three rows of five element buttons. Stock availability enables each type in all rows; the equipped type is outlined and can always be returned to a living friendly tower, even if its stock is zero. No slot selector, status, delivery or cancellation rows are shown. Tower recipe controls remain separate.
+The minion panel is exactly three rows of five element buttons. Stock availability enables each type in all rows; the equipped type is outlined and can always be returned to a living friendly tower, even if its stock is zero. No slot selector, status, delivery or cancellation rows are shown. The tower uses one matching row; five selected units automatically submit the birth and reset selection.

@@ -52,7 +52,7 @@
       showError(new Error('WebGL2 is unavailable.'));
     } else {
       try {
-        const { default: init } = await import('./pkg/lord_of_towers.js');
+        const { default: init } = await import('./pkg/__BUILD_ID__/lord_of_towers.js');
         await init();
       } catch (error) { showError(error); }
     }

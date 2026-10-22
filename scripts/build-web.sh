@@ -12,13 +12,15 @@ PY
 if ! command -v wasm-bindgen >/dev/null || [[ "$(wasm-bindgen --version)" != "wasm-bindgen $WASM_BINDGEN_VERSION" ]]; then
   cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
 fi
-mkdir -p dist/pkg
-wasm-bindgen --target web --out-dir dist/pkg --out-name lord_of_towers target/wasm32-unknown-unknown/release/lord-of-towers.wasm
+package_dir="dist/pkg/${BUILD_COMMIT}"
+mkdir -p "$package_dir"
+wasm-bindgen --target web --out-dir "$package_dir" --out-name lord_of_towers target/wasm32-unknown-unknown/release/lord-of-towers.wasm
 cp web/index.html dist/index.html
 BUILD_SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}" python3 - <<'PY'
 import os
 from pathlib import Path
 p = Path('dist/index.html')
-p.write_text(p.read_text().replace('__BUILD_SHA__', os.environ['BUILD_SHA'][:7]))
+build = os.environ['BUILD_SHA']
+p.write_text(p.read_text().replace('__BUILD_SHA__', build[:7]).replace('__BUILD_ID__', build))
 PY
 touch dist/.nojekyll

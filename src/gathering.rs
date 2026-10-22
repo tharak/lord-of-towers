@@ -7,6 +7,7 @@ pub struct GatheringPlugin;
 impl Plugin for GatheringPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GatheringRuntime>()
+            .init_resource::<TrailIds>()
             .add_systems(FixedUpdate, navigate.in_set(SimSet::Target))
             .add_systems(
                 FixedUpdate,
@@ -19,14 +20,12 @@ impl Plugin for GatheringPlugin {
 #[derive(Resource)]
 struct GatheringRuntime {
     random: u64,
-    next_trip: u64,
     next_drop: u64,
 }
 impl Default for GatheringRuntime {
     fn default() -> Self {
         Self {
             random: 42,
-            next_trip: 0,
             next_drop: 0,
         }
     }
@@ -47,7 +46,6 @@ struct VisitedTrails(HashMap<u64, u32>);
 pub fn spawn_deposits(commands: &mut Commands, config: &SimulationConfig) {
     let mut runtime = GatheringRuntime {
         random: config.seed,
-        next_trip: 0,
         next_drop: 0,
     };
     let mut total = 0;
@@ -85,10 +83,10 @@ pub fn spawn_deposits(commands: &mut Commands, config: &SimulationConfig) {
         ));
     }
     commands.insert_resource(runtime);
-    commands.insert_resource(RawElementEconomy {
-        initial: total,
-        spent: 0,
-    });
+    commands.insert_resource(TrailIds::default());
+    commands.insert_resource(DrawTrailRequests::default());
+    commands.insert_resource(EraseTrailRequests::default());
+    commands.insert_resource(RawElementEconomy { initial: total });
 }
 pub fn drop_cargo(commands: &mut Commands, position: Vec2, amount: u32) {
     if amount > 0 {
@@ -171,9 +169,6 @@ fn navigate(world: &mut World) {
             continue;
         };
         if world.get::<Movement>(entity).is_none() {
-            continue;
-        }
-        if world.get::<AttackOrder>(entity).is_some() {
             continue;
         }
         if cargo.0 > 0 {
@@ -296,6 +291,18 @@ fn decay(world: &mut World) {
     for e in expired {
         world.despawn(e);
     }
+    clean_trail_memory(world);
+}
+
+/// Shared allocation prevents player strokes and cargo paths from becoming one trip.
+pub(crate) fn allocate_trip(world: &mut World) -> u64 {
+    let mut ids = world.resource_mut::<TrailIds>();
+    let trip = ids.next_trip;
+    ids.next_trip += 1;
+    trip
+}
+
+pub(crate) fn clean_trail_memory(world: &mut World) {
     let active: HashSet<_> = world
         .query::<&Trail>()
         .iter(world)
@@ -304,21 +311,45 @@ fn decay(world: &mut World) {
     for mut visited in world.query::<&mut VisitedTrails>().iter_mut(world) {
         visited.0.retain(|trip, _| active.contains(trip));
     }
+    let live: HashSet<_> = world
+        .query::<&Trail>()
+        .iter(world)
+        .map(|t| (t.trip, t.sequence))
+        .collect();
+    for (mut state, mut movement) in world
+        .query::<(&mut GatheringState, &mut Movement)>()
+        .iter_mut(world)
+    {
+        if let GatheringState::Following { trip, sequence } = *state {
+            if !live.contains(&(trip, sequence)) {
+                *state = GatheringState::Exploring;
+                movement.retarget_in = 0.0;
+            }
+        }
+    }
 }
-fn marker(world: &mut World, position: Vec2, owner: Allegiance, trip: u64, sequence: u32) {
+pub(crate) fn marker(
+    world: &mut World,
+    position: Vec2,
+    owner: Allegiance,
+    trip: u64,
+    sequence: u32,
+) -> Entity {
     let remaining = world.resource::<SimulationConfig>().trail_lifetime;
-    world.spawn((
-        Name::new("rawElement trail"),
-        MatchEntity,
-        EntityKind::Trail,
-        Position(position),
-        owner,
-        Trail {
-            trip,
-            sequence,
-            remaining,
-        },
-    ));
+    world
+        .spawn((
+            Name::new("rawElement trail"),
+            MatchEntity,
+            EntityKind::Trail,
+            Position(position),
+            owner,
+            Trail {
+                trip,
+                sequence,
+                remaining,
+            },
+        ))
+        .id()
 }
 fn collect(world: &mut World) {
     let radius = world.resource::<SimulationConfig>().pickup_radius;
@@ -332,10 +363,7 @@ fn collect(world: &mut World) {
             continue;
         };
         let mut candidates: Vec<_> = world
-            .query_filtered::<
-                (Entity, &Position, &RawElement, &Vision),
-                (With<Minion>, Without<AttackOrder>),
-            >()
+            .query_filtered::<(Entity, &Position, &RawElement, &Vision), With<Minion>>()
             .iter(world)
             .filter_map(|(e, p, a, v)| {
                 let d = p.0.distance_squared(position.0);
@@ -358,12 +386,7 @@ fn collect(world: &mut World) {
             };
             let p = world.get::<Position>(entity).unwrap().0;
             let tower = nearest_tower(world, p, owner.0);
-            let trip = {
-                let mut runtime = world.resource_mut::<GatheringRuntime>();
-                let trip = runtime.next_trip;
-                runtime.next_trip += 1;
-                trip
-            };
+            let trip = allocate_trip(world);
             world.entity_mut(entity).insert((
                 RawElement(1),
                 GatheringState::Returning { tower },
@@ -441,6 +464,7 @@ mod tests {
         world.insert_resource(SimulationConfig::default());
         world.insert_resource(MatchState::default());
         world.insert_resource(GatheringRuntime::default());
+        world.init_resource::<TrailIds>();
         world.insert_resource(Time::<Fixed>::from_hz(30.0));
         world
     }
@@ -629,5 +653,65 @@ mod tests {
             .advance_by(std::time::Duration::from_millis(500));
         decay(&mut w);
         assert_eq!(w.query::<&Trail>().iter(&w).count(), 0);
+    }
+    #[test]
+    fn player_markers_follow_with_gaps_and_cargo_keeps_returning() {
+        let mut w = world();
+        let own = w.spawn_empty().id();
+        let home = tower(&mut w, own, Vec2::Y * 20.0);
+        let u = unit(&mut w, own, 1, Vec2::ZERO);
+        let trip = allocate_trip(&mut w);
+        let first = marker(&mut w, Vec2::X * 2.0, Allegiance(own), trip, 7);
+        w.entity_mut(first).insert(PlayerDrawnTrail { serial: 0 });
+        let last = marker(&mut w, Vec2::X * 6.0, Allegiance(own), trip, 0);
+        w.entity_mut(last).insert(PlayerDrawnTrail { serial: 1 });
+        navigate(&mut w);
+        assert_eq!(target(&w, u), Vec2::X * 2.0);
+        w.get_mut::<Position>(u).unwrap().0 = Vec2::X * 2.0;
+        navigate(&mut w);
+        assert_eq!(target(&w, u), Vec2::X * 6.0);
+        w.entity_mut(u).insert((
+            RawElement(1),
+            GatheringState::Returning { tower: Some(home) },
+        ));
+        navigate(&mut w);
+        assert_eq!(target(&w, u), Vec2::Y * 20.0);
+        w.entity_mut(u).insert((
+            RawElement(0),
+            GatheringState::Following { trip, sequence: 0 },
+            VisitedTrails(HashMap::from([(trip, 7)])),
+        ));
+        w.despawn(last);
+        clean_trail_memory(&mut w);
+        assert!(matches!(
+            w.get::<GatheringState>(u),
+            Some(GatheringState::Exploring)
+        ));
+        assert_eq!(w.get::<Movement>(u).unwrap().retarget_in, 0.0);
+        w.despawn(first);
+        clean_trail_memory(&mut w);
+        assert!(w.get::<VisitedTrails>(u).unwrap().0.is_empty());
+    }
+    #[test]
+    fn match_setup_resets_shared_identity_and_pending_gestures() {
+        let mut w = world();
+        w.insert_resource(DrawTrailRequests(vec![vec![Vec2::ZERO]]));
+        w.insert_resource(EraseTrailRequests(vec![Vec2::ZERO]));
+        w.resource_mut::<TrailIds>().next_trip = 99;
+        w.resource_mut::<TrailIds>().next_player_marker = 88;
+        let config = SimulationConfig {
+            deposit_count: 0,
+            ..default()
+        };
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &w);
+            spawn_deposits(&mut commands, &config);
+        }
+        queue.apply(&mut w);
+        assert_eq!(w.resource::<TrailIds>().next_trip, 0);
+        assert_eq!(w.resource::<TrailIds>().next_player_marker, 0);
+        assert!(w.resource::<DrawTrailRequests>().0.is_empty());
+        assert!(w.resource::<EraseTrailRequests>().0.is_empty());
     }
 }

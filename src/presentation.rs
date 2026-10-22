@@ -6,8 +6,17 @@ pub struct PresentationPlugin;
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.055)))
+            .init_resource::<TrailTool>()
+            .init_resource::<CameraGesture>()
             .add_systems(Startup, setup)
             .add_systems(PreUpdate, browser_visibility)
+            .add_systems(
+                Update,
+                (
+                    responsive_layout,
+                    browser_mobile_state.after(camera_controls),
+                ),
+            )
             .add_systems(
                 Update,
                 (
@@ -58,6 +67,17 @@ struct SpectatorCamera;
 #[derive(Component)]
 struct StatusText;
 #[derive(Component)]
+struct HudRoot;
+#[derive(Component)]
+struct HudTitle;
+#[derive(Component)]
+struct DesktopDetail;
+#[derive(Component)]
+struct ControlBar;
+fn mobile_layout(width: f32, height: f32) -> bool {
+    width < 760.0 || height < 540.0
+}
+#[derive(Component)]
 struct FactionText(usize);
 #[derive(Component, Clone, Copy)]
 enum Control {
@@ -65,6 +85,7 @@ enum Control {
     Speed(f32),
     Restart,
     Inspector,
+    Tool(TrailTool),
 }
 
 fn setup(
@@ -148,8 +169,9 @@ fn setup(
         Camera3d::default(),
         bevy::core_pipeline::tonemapping::Tonemapping::SomewhatBoringDisplayTransform,
         Projection::from(OrthographicProjection {
-            scaling_mode: ScalingMode::FixedVertical {
-                viewport_height: 120.0,
+            scaling_mode: ScalingMode::AutoMin {
+                min_width: 120.0,
+                min_height: 120.0,
             },
             ..OrthographicProjection::default_3d()
         }),
@@ -158,6 +180,7 @@ fn setup(
     commands
         .spawn((
             Name::new("Match information"),
+            HudRoot,
             EntityKind::Ui,
             Node {
                 position_type: PositionType::Absolute,
@@ -173,6 +196,7 @@ fn setup(
         .with_children(|parent| {
             parent.spawn((
                 Name::new("Game title"),
+                HudTitle,
                 EntityKind::Ui,
                 Text::new("LORD OF TOWERS"),
                 TextFont {
@@ -195,6 +219,7 @@ fn setup(
                     Name::new(format!("{name} statistics")),
                     EntityKind::Ui,
                     FactionText(i),
+                    DesktopDetail,
                     Text::new(*name),
                     TextColor(faction_color(i)),
                     TextFont {
@@ -205,6 +230,7 @@ fn setup(
             }
             parent.spawn((
                 Name::new("Camera instructions"),
+                DesktopDetail,
                 EntityKind::Ui,
                 Text::new(
                     "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nDrag/touch: draw attack trail   Right click near trail: erase",
@@ -217,6 +243,7 @@ fn setup(
             ));
             parent.spawn((
                 Name::new("Build identifier"),
+                DesktopDetail,
                 EntityKind::Ui,
                 Text::new(format!(
                     "Build {}",
@@ -235,6 +262,7 @@ fn setup(
     commands
         .spawn((
             Name::new("Spectator controls"),
+            ControlBar,
             EntityKind::Ui,
             Node {
                 position_type: PositionType::Absolute,
@@ -249,6 +277,8 @@ fn setup(
         .with_children(|parent| {
             for (label, control) in [
                 ("Pause / Play", Control::Pause),
+                ("Draw", Control::Tool(TrailTool::Draw)),
+                ("Erase", Control::Tool(TrailTool::Erase)),
                 ("1x", Control::Speed(1.0)),
                 ("2x", Control::Speed(2.0)),
                 ("4x", Control::Speed(4.0)),
@@ -262,7 +292,10 @@ fn setup(
                         Button,
                         control,
                         Node {
-                            padding: UiRect::axes(px(14), px(12)),
+                            height: px(44),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            padding: UiRect::axes(px(14), px(0)),
                             ..default()
                         },
                         BackgroundColor(Color::srgb(0.13, 0.17, 0.23)),
@@ -792,33 +825,91 @@ fn keyboard_controls(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<MatchSta
         state.restart_requested = true;
     }
 }
+fn responsive_layout(
+    windows: Query<&Window>,
+    mut nodes: Query<(
+        &mut Node,
+        Option<&HudRoot>,
+        Option<&ControlBar>,
+        Option<&Control>,
+        Option<&DesktopDetail>,
+    )>,
+    mut titles: Query<&mut TextFont, With<HudTitle>>,
+) {
+    let Some(window) = windows.iter().next() else {
+        return;
+    };
+    let mobile = mobile_layout(window.width(), window.height());
+    for (mut node, hud, bar, control, detail) in &mut nodes {
+        if hud.is_some() {
+            node.top = px(if mobile { 8 } else { 18 });
+            node.left = px(if mobile { 8 } else { 20 });
+            node.padding = UiRect::all(px(if mobile { 8 } else { 14 }));
+            node.max_width = if mobile {
+                px(window.width() - 16.0)
+            } else {
+                Val::Auto
+            };
+        }
+        if detail.is_some() {
+            node.display = if mobile { Display::None } else { Display::Flex };
+        }
+        if bar.is_some() {
+            node.left = px(if mobile { 8 } else { 20 });
+            node.right = if mobile { px(8) } else { Val::Auto };
+            node.bottom = px(if mobile { 12 } else { 20 });
+            node.column_gap = px(if mobile { 6 } else { 8 });
+            node.row_gap = px(if mobile { 6 } else { 8 });
+        }
+        if control.is_some() {
+            node.width = if mobile {
+                px(((window.width() - 34.0) / 4.0).max(1.0))
+            } else {
+                Val::Auto
+            };
+            node.padding = UiRect::axes(px(if mobile { 0 } else { 14 }), px(0));
+            node.flex_shrink = 0.0;
+        }
+    }
+    for mut font in &mut titles {
+        font.font_size = FontSize::Px(if mobile { 18.0 } else { 24.0 });
+    }
+}
 fn button_controls(
-    mut buttons: Query<(&Interaction, &Control, &mut BackgroundColor), Changed<Interaction>>,
+    mut buttons: Query<(Ref<Interaction>, &Control, &mut BackgroundColor)>,
     mut state: ResMut<MatchState>,
     mut inspector: ResMut<InspectorState>,
+    mut tool: ResMut<TrailTool>,
 ) {
+    // Act only on a new press while updating selected tool colors every frame.
     for (interaction, control, mut color) in &mut buttons {
-        color.0 = if *interaction == Interaction::None {
-            Color::srgb(0.13, 0.17, 0.23)
-        } else {
-            Color::srgb(0.24, 0.32, 0.43)
-        };
-        if *interaction == Interaction::Pressed {
+        if *interaction == Interaction::Pressed && interaction.is_changed() {
             match control {
                 Control::Pause => state.paused = !state.paused,
                 Control::Speed(speed) => state.speed = *speed,
                 Control::Restart => state.restart_requested = true,
                 Control::Inspector => inspector.open = !inspector.open,
+                Control::Tool(selected) => *tool = *selected,
             }
         }
+        let selected = matches!(control, Control::Tool(selected) if *selected == *tool);
+        color.0 = if selected {
+            Color::srgb(0.12, 0.4, 0.48)
+        } else if *interaction == Interaction::None {
+            Color::srgb(0.13, 0.17, 0.23)
+        } else {
+            Color::srgb(0.24, 0.32, 0.43)
+        };
     }
 }
 fn camera_controls(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
+    mut gesture: ResMut<CameraGesture>,
     mut cameras: Query<(&mut Transform, &mut Projection), With<SpectatorCamera>>,
 ) {
     for (mut transform, mut projection) in &mut cameras {
+        transform.translation += Vec3::new(gesture.pan.x, 0.0, gesture.pan.y);
         let x = (keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight)) as i32
             - (keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft)) as i32;
         let z = (keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown)) as i32
@@ -829,10 +920,13 @@ fn camera_controls(
             let zoom = (keys.pressed(KeyCode::Minus) || keys.pressed(KeyCode::NumpadSubtract))
                 as i32
                 - (keys.pressed(KeyCode::Equal) || keys.pressed(KeyCode::NumpadAdd)) as i32;
-            orthographic.scale =
-                (orthographic.scale + zoom as f32 * time.delta_secs().min(0.1)).clamp(0.3, 2.0);
+            orthographic.scale = (orthographic.scale * gesture.zoom
+                + zoom as f32 * time.delta_secs().min(0.1))
+            .clamp(0.3, 2.0);
         }
     }
+    gesture.pan = Vec2::ZERO;
+    gesture.zoom = 1.0;
 }
 fn update_hud(
     state: Res<MatchState>,
@@ -874,6 +968,45 @@ fn update_hud(
                 state.elapsed
             )
         };
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn browser_mobile_state() {}
+#[cfg(target_arch = "wasm32")]
+fn browser_mobile_state(
+    tool: Res<TrailTool>,
+    windows: Query<&Window>,
+    cameras: Query<(&Transform, &Projection), With<SpectatorCamera>>,
+) {
+    let Some(status) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("game-status"))
+    else {
+        return;
+    };
+    let _ = status.set_attribute(
+        "data-trail-tool",
+        match *tool {
+            TrailTool::Draw => "draw",
+            TrailTool::Erase => "erase",
+        },
+    );
+    if let Some(window) = windows.iter().next() {
+        let _ = status.set_attribute(
+            "data-mobile-layout",
+            if mobile_layout(window.width(), window.height()) {
+                "true"
+            } else {
+                "false"
+            },
+        );
+    }
+    for (transform, projection) in &cameras {
+        if let Projection::Orthographic(orthographic) = projection {
+            let _ = status.set_attribute("data-camera-scale", &orthographic.scale.to_string());
+        }
+        let _ = status.set_attribute("data-camera-x", &transform.translation.x.to_string());
+        let _ = status.set_attribute("data-camera-z", &transform.translation.z.to_string());
     }
 }
 #[cfg(not(target_arch = "wasm32"))]
@@ -1019,6 +1152,77 @@ fn browser_visibility(mut state: ResMut<MatchState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mobile_breakpoint_covers_portrait_and_short_landscape() {
+        assert!(mobile_layout(390.0, 844.0));
+        assert!(mobile_layout(844.0, 390.0));
+        assert!(!mobile_layout(1280.0, 720.0));
+        assert!(!mobile_layout(760.0, 540.0));
+    }
+
+    #[test]
+    fn camera_gesture_is_consumed_once_and_zoom_is_bounded() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Time>()
+            .insert_resource(CameraGesture {
+                pan: Vec2::new(4.0, -3.0),
+                zoom: 10.0,
+            })
+            .add_systems(Update, camera_controls);
+        let camera = app
+            .world_mut()
+            .spawn((
+                SpectatorCamera,
+                Transform::default(),
+                Projection::from(OrthographicProjection::default_3d()),
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(camera).unwrap().translation,
+            Vec3::new(4.0, 0.0, -3.0)
+        );
+        let Projection::Orthographic(projection) = app.world().get::<Projection>(camera).unwrap()
+        else {
+            panic!("orthographic camera")
+        };
+        assert_eq!(projection.scale, 2.0);
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(camera).unwrap().translation,
+            Vec3::new(4.0, 0.0, -3.0)
+        );
+        assert_eq!(app.world().resource::<CameraGesture>().pan, Vec2::ZERO);
+        assert_eq!(app.world().resource::<CameraGesture>().zoom, 1.0);
+    }
+
+    #[test]
+    fn selecting_erase_persists_after_button_release() {
+        let mut app = App::new();
+        app.init_resource::<MatchState>()
+            .init_resource::<InspectorState>()
+            .init_resource::<TrailTool>()
+            .add_systems(Update, button_controls);
+        let erase = app
+            .world_mut()
+            .spawn((
+                Interaction::Pressed,
+                Control::Tool(TrailTool::Erase),
+                BackgroundColor::default(),
+            ))
+            .id();
+        app.update();
+        assert_eq!(*app.world().resource::<TrailTool>(), TrailTool::Erase);
+        app.world_mut().entity_mut(erase).insert(Interaction::None);
+        app.update();
+        assert_eq!(*app.world().resource::<TrailTool>(), TrailTool::Erase);
+        assert_eq!(
+            app.world().get::<BackgroundColor>(erase).unwrap().0,
+            Color::srgb(0.12, 0.4, 0.48)
+        );
+    }
 
     fn donuts(world: &mut World, parent: Entity) -> Vec<Entity> {
         world

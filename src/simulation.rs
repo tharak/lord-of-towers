@@ -98,7 +98,7 @@ struct Neighbor {
 }
 
 #[derive(Resource, Default)]
-struct SpatialIndex(HashMap<(i32, i32), Vec<Neighbor>>);
+pub(crate) struct SpatialIndex(HashMap<(i32, i32), Vec<Neighbor>>);
 impl SpatialIndex {
     const CELL: f32 = 8.0;
     fn cell(position: Vec2) -> (i32, i32) {
@@ -119,7 +119,7 @@ impl SpatialIndex {
 }
 
 #[derive(Resource, Default)]
-struct PendingDamage(HashMap<Entity, [f32; 5]>);
+pub(crate) struct PendingDamage(HashMap<Entity, [f32; 5]>);
 
 fn setup_match(
     mut commands: Commands,

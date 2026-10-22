@@ -308,11 +308,18 @@ fn transfer_orders(world: &mut World) {
                     }
                 }
             }
-            TowerOrderAction::DeliverCargo => {
-                if let Some(mut cargo) = world.get_mut::<ElementInventory>(order.minion) {
-                    returned.extend(cargo.units.drain(..));
-                }
-            }
+            TowerOrderAction::DeliverCargo => {}
+        }
+        // All homeward orders deliver cargo at their actual destination.
+        if let Some(mut cargo) = world.get_mut::<ElementInventory>(order.minion) {
+            returned.extend(cargo.units.drain(..));
+        }
+        world
+            .entity_mut(order.minion)
+            .insert(GatheringState::Exploring)
+            .remove::<TrailEmitter>();
+        if let Some(mut movement) = world.get_mut::<Movement>(order.minion) {
+            movement.retarget_in = 0.0;
         }
         if let Some(mut stock) = world.get_mut::<ElementInventory>(order.tower) {
             stock.units.extend(returned);

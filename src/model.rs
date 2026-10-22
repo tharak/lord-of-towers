@@ -286,9 +286,16 @@ impl ElementStats {
     }
     pub fn equipped_multiplier(&self, element: Element, gear: &EquippedElements) -> f32 {
         let counts = gear.counts();
-        let level = match element { Element::Fire => self.fire, Element::Water => self.water,
-            Element::Earth => self.earth, Element::Air => self.air, Element::Void => return 1.0 };
-        1.0 + 0.10 * level as f32 * counts[element as usize] as f32
+        let level = match element {
+            Element::Fire => self.fire,
+            Element::Water => self.water,
+            Element::Earth => self.earth,
+            Element::Air => self.air,
+            Element::Void => return 1.0,
+        };
+        1.0 + 0.10
+            * level as f32
+            * counts[element as usize] as f32
             * (1.0 + 0.10 * self.void as f32 * counts[Element::Void as usize] as f32)
     }
 }
@@ -316,7 +323,9 @@ pub struct Trail {
 }
 /// Identity sequence for carrier trips.
 #[derive(Resource, Default)]
-pub struct TrailIds { pub next_trip: u64 }
+pub struct TrailIds {
+    pub next_trip: u64,
+}
 
 #[derive(Resource, Debug)]
 pub struct HudVisibility {
@@ -377,16 +386,24 @@ pub struct PendingTowerAlerts(pub Vec<TowerAlert>);
 
 /// Three physical units, independent of gathering cargo and permanent birth stats.
 #[derive(Component, Clone, Copy, Debug, Default)]
-pub struct EquippedElements { pub slots: [Option<Element>; 3] }
+pub struct EquippedElements {
+    pub slots: [Option<Element>; 3],
+}
 impl EquippedElements {
     pub fn counts(&self) -> [u32; 5] {
         let mut counts = [0; 5];
-        for element in self.slots.iter().flatten() { counts[*element as usize] += 1; }
+        for element in self.slots.iter().flatten() {
+            counts[*element as usize] += 1;
+        }
         counts
     }
 }
 #[derive(Clone, Copy, Debug)]
-pub enum TowerOrderAction { Equip { slot: usize }, ReturnEquipment { slot: usize }, DeliverCargo }
+pub enum TowerOrderAction {
+    Equip { slot: usize },
+    ReturnEquipment { slot: usize },
+    DeliverCargo,
+}
 /// Reservation lives in this entity's ElementInventory, never in spendable tower stock.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct EquipmentOrder {
@@ -397,11 +414,28 @@ pub struct EquipmentOrder {
 }
 #[derive(Clone, Debug)]
 pub enum PlayerCommand {
-    Equip { minion: Entity, tower: Entity, slot: usize, element: Element },
-    ReturnEquipment { minion: Entity, tower: Entity, slot: usize },
-    DeliverCargo { minion: Entity, tower: Entity },
-    CancelOrder { minion: Entity },
-    CreateMinion { tower: Entity, counts: [u32; 5] },
+    Equip {
+        minion: Entity,
+        tower: Entity,
+        slot: usize,
+        element: Element,
+    },
+    ReturnEquipment {
+        minion: Entity,
+        tower: Entity,
+        slot: usize,
+    },
+    DeliverCargo {
+        minion: Entity,
+        tower: Entity,
+    },
+    CancelOrder {
+        minion: Entity,
+    },
+    CreateMinion {
+        tower: Entity,
+        counts: [u32; 5],
+    },
 }
 #[derive(Resource, Default)]
 pub struct PlayerCommands(pub Vec<PlayerCommand>);

@@ -318,9 +318,7 @@ fn context_panel(world: &mut World) {
                 let mut choice = row(
                     format!("Equip {} ({available})", element.name()),
                     nearest
-                        .filter(|_| {
-                            available > 0 && pending.is_none() && gear.slots[slot].is_none()
-                        })
+                        .filter(|_| available > 0 && pending.is_none())
                         .map(|(tower, _)| {
                             ContextAction::Command(PlayerCommand::Equip {
                                 minion: entity,
@@ -406,6 +404,7 @@ fn context_panel(world: &mut World) {
     }
     world
         .spawn((
+            Name::new("Selection context panel"),
             ContextPanel,
             EntityKind::Ui,
             Interaction::None,
@@ -427,6 +426,7 @@ fn context_panel(world: &mut World) {
         .with_children(|panel| {
             panel.spawn((
                 EntityKind::Ui,
+                Name::new("Selection heading"),
                 Text::new(heading),
                 TextFont {
                     font_size: FontSize::Px(14.0),
@@ -437,6 +437,7 @@ fn context_panel(world: &mut World) {
                 let enabled = row.action.is_some();
                 let mut item = panel.spawn((
                     EntityKind::Ui,
+                    Name::new("Selection action"),
                     Node {
                         min_height: px(row_height),
                         flex_shrink: 0.0,
@@ -456,6 +457,7 @@ fn context_panel(world: &mut World) {
                 item.with_children(|button| {
                     button.spawn((
                         EntityKind::Ui,
+                        Name::new("Selection action label"),
                         Text::new(row.label),
                         TextFont {
                             font_size: FontSize::Px((row_height - 3.0).clamp(10.0, 12.0)),

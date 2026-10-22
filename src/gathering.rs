@@ -459,8 +459,16 @@ fn collect(world: &mut World) {
     }
 }
 fn deliver(world: &mut World) {
+    let ordered: HashSet<Entity> = world
+        .query::<&EquipmentOrder>()
+        .iter(world)
+        .map(|o| o.minion)
+        .collect();
     let radius = world.resource::<SimulationConfig>().delivery_radius;
     for entity in units(world) {
+        if ordered.contains(&entity) {
+            continue;
+        }
         let Some(GatheringState::Returning { tower: Some(tower) }) =
             world.get::<GatheringState>(entity).copied()
         else {

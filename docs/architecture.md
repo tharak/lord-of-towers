@@ -14,4 +14,6 @@ Presentation builds a shared primitive mesh/material palette and attaches stacks
 
 Inspector exposes a public `InspectorState { pub open: bool }` resource for presentation's button. Avoid browser-blocked F3 as the only entrypoint.
 
+Mobile input keeps one-finger trail editing separate from two-finger camera navigation. `TrailTool` selects Draw or Erase; `CameraGesture` carries world-space pan and pinch scale to presentation. A two-finger gesture discards an unfinished stroke and drawing stays suppressed until every finger lifts. Compact ECS controls and camera framing adapt to narrow or short windows, including orientation changes.
+
 GatheringPlugin owns finite deposits, local navigation, delivery, and fading trails. See [gathering contracts](gathering-contracts.md). EnergyPlugin owns only supply graph/transfer systems in the Energy phase. See [energy contracts](energy-contracts.md) for component interfaces, deterministic topology and pulse semantics. Energy entities participate in match reset and the live entity catalog.

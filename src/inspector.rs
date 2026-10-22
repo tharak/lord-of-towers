@@ -110,6 +110,10 @@ fn setup(mut commands: Commands) {
                             Button,
                             action,
                             Node {
+                                min_height: px(44),
+                                min_width: px(44),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
                                 padding: UiRect::axes(px(8), px(5)),
                                 ..default()
                             },
@@ -268,9 +272,35 @@ fn append_energy_details(text: &mut String, entity: &EntityRef) {
 
 fn refresh(world: &mut World) {
     let open = world.resource::<InspectorState>().open;
+    let viewport = world
+        .query::<&Window>()
+        .iter(world)
+        .next()
+        .map(|window| (window.width(), window.height()));
+    let mobile = viewport.is_some_and(|(width, height)| width < 760.0 || height < 540.0);
     let mut roots = world.query_filtered::<&mut Node, With<InspectorRoot>>();
     for mut node in roots.iter_mut(world) {
         node.display = if open { Display::Flex } else { Display::None };
+        if let Some((width, height)) = viewport {
+            node.top = px(if mobile { 86 } else { 90 });
+            node.right = px(if mobile { 8 } else { 12 });
+            node.width = px(if mobile {
+                (width - 16.0).max(1.0)
+            } else {
+                520.0
+            });
+            node.max_height = if mobile {
+                px((height - 202.0).max(80.0))
+            } else {
+                Val::Auto
+            };
+            node.padding = UiRect::all(px(if mobile { 8 } else { 12 }));
+            node.overflow = if mobile {
+                Overflow::clip()
+            } else {
+                Overflow::visible()
+            };
+        }
     }
     if !open {
         return;
@@ -329,7 +359,8 @@ fn refresh(world: &mut World) {
             .map(|info| info.name().to_string())
             .collect();
         components.sort();
-        let pages = components.len().div_ceil(16).max(1);
+        let component_count = if mobile { 5 } else { 16 };
+        let pages = components.len().div_ceil(component_count).max(1);
         let component_page = component_page % pages;
         let _ = writeln!(
             text,
@@ -337,12 +368,29 @@ fn refresh(world: &mut World) {
             components.len(),
             component_page + 1
         );
-        for name in components.iter().skip(component_page * 16).take(16) {
+        for name in components
+            .iter()
+            .skip(component_page * component_count)
+            .take(component_count)
+        {
             // Short Rust type names fit the panel; names are obtained from ECS metadata.
             let _ = writeln!(text, "- {}", short_type_name(name));
         }
     } else {
         text.push_str("\nNo matching live entities.");
+    }
+    if mobile {
+        // Keep the live view readable inside the bounded panel. Components remain paged.
+        let (width, height) = viewport.unwrap();
+        let columns = ((width - 36.0) / 7.5).max(12.0) as usize;
+        let lines = ((height - 350.0) / 17.0).max(3.0) as usize;
+        text = text
+            .lines()
+            .filter(|line| !line.is_empty())
+            .take(lines)
+            .map(|line| line.chars().take(columns).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
     }
     let mut details = world.query_filtered::<&mut Text, With<InspectorText>>();
     for mut target in details.iter_mut(world) {

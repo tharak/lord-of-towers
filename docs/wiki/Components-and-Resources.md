@@ -35,6 +35,7 @@
 | `EnergyOrbVisual` | Presentation-only small sphere child. One per actual stored minion energy point. |
 | `SpectatorCamera` | Camera control target. |
 | `StatusText`, `FactionText`, `Control` | Debug HUD labels and clickable controls. |
+| `HudRoot`, `HudTitle`, `DesktopDetail`, `ControlBar` | Responsive UI roles: compact header, hidden small-screen details, and touch-sized control layout. |
 | `InspectorRoot`, `InspectorText`, `InspectorAction` | Inspector panel, details, and navigation/filter controls. |
 | Bevy mesh, material, transform, hierarchy and visibility components | Shared primitive rendering, parent-child lifetime, and display state. |
 
@@ -49,6 +50,8 @@
 | `CancelAttackOrderRequests` | Pending right-click ground points used to remove the whole player path when a marker is within two world units. |
 | `AttackPathIds` | Monotonic path ID sequence, grouping attack-trail marker entities into complete strokes. |
 | `DrawingAttackPath` | In-progress mouse or touch stroke and its sampled world points, committed as one path on release. |
+| `TrailTool` | Player-selected Draw or Erase mode for one-finger and left-mouse input. |
+| `CameraGesture` | Two-finger world-space pan and pinch scale queued by input and consumed by camera presentation. |
 | `MatchState` | Pause, speed, hidden-tab, elapsed time, winner and restart request. |
 | `FactionEntities` | Five live faction entity IDs for deterministic ownership lookup. |
 | `RawElementEconomy` | Initial resource total and cumulative spending; verifies that live deposits, cargo and stock plus spending equal the initial total. |

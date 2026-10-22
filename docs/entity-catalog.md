@@ -21,11 +21,11 @@ Every application-created entity must include `Name` and `EntityKind`. Add a row
 | Battlefield | `Name`, `EntityKind::Battlefield`, presentation mesh/material/transform | Presentation setup; survives restart. Ground coloring samples influence; terrain carries no gameplay ownership. | #7, #8 |
 | Camera | `Name`, `EntityKind::Camera`, camera/projection/transform components | Presentation setup; survives restart. | #8 |
 | Light | `Name`, `EntityKind::Light`, lighting/transform components | Presentation setup; survives restart. | #8 |
-| Main HUD and controls | `Name`, `EntityKind::Ui`, `Node`, text/button/interaction components as appropriate | Presentation setup; survives restart. State follows resources. | #8 |
+| Main HUD and controls | `Name`, `EntityKind::Ui`, `Node`, text/button/interaction components as appropriate | Presentation setup; survives restart. Draw/Erase tools and touch-sized controls follow live resources; compact layout hides detailed statistics on small viewports. | #8, #46 |
 | Inspector panel | `Name`, `EntityKind::Ui`, `InspectorRoot`, `Node`, background and z-index | Inspector startup; survives restart; display toggled by `InspectorState.open`. | #3 |
 | Inspector control bar | `Name`, `EntityKind::Ui`, `Node`, parent-child relationship | Child of inspector panel, created once at startup. | #3 |
 | Inspector buttons and labels | `Name`, `EntityKind::Ui`, `Button` / `InspectorAction` / `Node` or `Text`; parent-child relationship | Created once. Buttons cycle kind/faction filters, unclassified inclusion, entity page, component page, and close. | #3 |
-| Inspector detail text | `Name`, `EntityKind::Ui`, `InspectorText`, `Text` and text styles | Created once. Refreshes at most four times per second, one entity and sixteen component type names per page. Despawns automatically disappear on refresh. | #3 |
+| Inspector detail text | `Name`, `EntityKind::Ui`, `InspectorText`, `Text` and text styles | Created once. Refreshes at most four times per second, one entity and sixteen component type names per page (five on compact screens). Despawns automatically disappear on refresh. | #3, #46 |
 
 ## Influence lifecycle
 

@@ -16,6 +16,39 @@ enum DrawingPointer {
 struct DrawingAttackPath {
     pointer: Option<DrawingPointer>,
     points: Vec<Vec2>,
+    touch_navigation: TouchNavigation,
+    tool: TrailTool,
+}
+
+#[derive(Default)]
+struct TouchNavigation {
+    suppress_drawing: bool,
+    previous: Option<[(u64, Vec2); 2]>,
+    mouse_cooldown: f32,
+}
+
+impl TouchNavigation {
+    fn update(&mut self, touches: &[(u64, Vec2)], touch_event: bool, delta: f32) {
+        self.mouse_cooldown = (self.mouse_cooldown - delta).max(0.0);
+        if touch_event || !touches.is_empty() {
+            self.mouse_cooldown = 0.75;
+        }
+        if touches.len() >= 2 {
+            self.suppress_drawing = true;
+        } else {
+            self.previous = None;
+            if touches.is_empty() {
+                self.suppress_drawing = false;
+            }
+        }
+    }
+}
+
+fn pinch_ratio(previous: [Vec2; 2], current: [Vec2; 2]) -> Option<f32> {
+    let before = previous[0].distance(previous[1]);
+    let after = current[0].distance(current[1]);
+    (before.is_finite() && after.is_finite() && before > 1.0 && after > 1.0)
+        .then_some(before / after)
 }
 
 pub struct OrdersPlugin;
@@ -25,6 +58,8 @@ impl Plugin for OrdersPlugin {
             .init_resource::<CancelAttackOrderRequests>()
             .init_resource::<AttackPathIds>()
             .init_resource::<DrawingAttackPath>()
+            .init_resource::<TrailTool>()
+            .init_resource::<CameraGesture>()
             .add_systems(Update, (gather_pointer_orders, cancel_orders).chain())
             .add_systems(
                 FixedUpdate,
@@ -44,10 +79,39 @@ fn gather_pointer_orders(
     interactions: Query<&Interaction>,
     inspector: Option<Res<InspectorState>>,
     state: Res<MatchState>,
+    tool: Res<TrailTool>,
+    mut gesture: ResMut<CameraGesture>,
+    time: Option<Res<Time>>,
     mut requests: ResMut<AttackOrderRequests>,
     mut cancellations: ResMut<CancelAttackOrderRequests>,
     mut drawing: ResMut<DrawingAttackPath>,
 ) {
+    let touches = touches.as_deref();
+    let mut active: Vec<_> = touches
+        .into_iter()
+        .flat_map(|touches| touches.iter())
+        .map(|touch| (touch.id(), touch.position()))
+        .collect();
+    active.sort_by_key(|(id, _)| *id);
+    let touch_event = touches.is_some_and(|touches| {
+        touches.iter_just_pressed().next().is_some()
+            || touches.any_just_released()
+            || touches.iter_just_canceled().next().is_some()
+    });
+    drawing.touch_navigation.update(
+        &active,
+        touch_event,
+        time.as_ref().map_or(1.0 / 60.0, |time| time.delta_secs()),
+    );
+    let tool_changed = drawing.tool != *tool;
+    drawing.tool = *tool;
+    if tool_changed {
+        drawing.pointer = None;
+        drawing.points.clear();
+        if !active.is_empty() {
+            drawing.touch_navigation.suppress_drawing = true;
+        }
+    }
     if state.restart_requested
         || state.browser_hidden
         || state.winner.is_some()
@@ -58,6 +122,10 @@ fn gather_pointer_orders(
     {
         drawing.pointer = None;
         drawing.points.clear();
+        drawing.touch_navigation.previous = None;
+        if !active.is_empty() {
+            drawing.touch_navigation.suppress_drawing = true;
+        }
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -65,22 +133,67 @@ fn gather_pointer_orders(
         return;
     };
     let mouse = mouse.as_deref();
-    let touches = touches.as_deref();
+    if active.len() >= 2 {
+        drawing.pointer = None;
+        drawing.points.clear();
+        let current = [active[0], active[1]];
+        if let Some(previous) = drawing.touch_navigation.previous
+            && previous[0].0 == current[0].0
+            && previous[1].0 == current[1].0
+        {
+            let before = [previous[0].1, previous[1].1];
+            let after = [current[0].1, current[1].1];
+            if let (Some(previous_ground), Some(current_ground)) = (
+                ground_point(camera, transform, (before[0] + before[1]) * 0.5),
+                ground_point(camera, transform, (after[0] + after[1]) * 0.5),
+            ) {
+                gesture.pan += previous_ground - current_ground;
+            }
+            if let Some(ratio) = pinch_ratio(before, after) {
+                gesture.zoom *= ratio;
+            }
+        }
+        drawing.touch_navigation.previous = Some(current);
+        return;
+    }
+    if drawing.touch_navigation.suppress_drawing {
+        drawing.pointer = None;
+        drawing.points.clear();
+        return;
+    }
+    let mouse_allowed = drawing.touch_navigation.mouse_cooldown <= 0.0;
+    if !mouse_allowed && matches!(drawing.pointer, Some(DrawingPointer::Mouse)) {
+        drawing.pointer = None;
+        drawing.points.clear();
+    }
     if drawing.pointer.is_none() {
         if let Some(touch) = touches.and_then(|touches| touches.iter_just_pressed().next()) {
-            drawing.pointer = Some(DrawingPointer::Touch(touch.id()));
-            if let Some(point) = ground_point(camera, transform, touch.position()) {
-                append_path_point(&mut drawing.points, point);
+            if *tool == TrailTool::Erase {
+                if let Some(point) = ground_point(camera, transform, touch.position()) {
+                    cancellations.0.push(point);
+                }
+            } else {
+                drawing.pointer = Some(DrawingPointer::Touch(touch.id()));
+                if let Some(point) = ground_point(camera, transform, touch.position()) {
+                    append_path_point(&mut drawing.points, point);
+                }
             }
-        } else if mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Left))
+        } else if mouse_allowed
+            && mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Left))
             && touches.is_none_or(|touches| !touches.any_just_released())
         {
-            drawing.pointer = Some(DrawingPointer::Mouse);
+            if *tool == TrailTool::Draw {
+                drawing.pointer = Some(DrawingPointer::Mouse);
+            }
             if let Some(point) = window
                 .cursor_position()
                 .and_then(|position| ground_point(camera, transform, position))
             {
-                append_path_point(&mut drawing.points, point);
+                if *tool == TrailTool::Erase {
+                    cancellations.0.push(point);
+                } else {
+                    append_path_point(&mut drawing.points, point);
+                }
             }
         }
     }
@@ -119,7 +232,8 @@ fn gather_pointer_orders(
             requests.0.push(std::mem::take(&mut drawing.points));
         }
     }
-    if mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Right))
+    if mouse_allowed
+        && mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Right))
         && let Some(point) = window
             .cursor_position()
             .and_then(|position| ground_point(camera, transform, position))
@@ -426,6 +540,50 @@ fn distance_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pinch_spread_zooms_in_and_degenerate_pairs_are_ignored() {
+        let previous = [Vec2::ZERO, Vec2::X * 20.0];
+        let spread = [Vec2::ZERO, Vec2::X * 40.0];
+        assert_eq!(pinch_ratio(previous, spread), Some(0.5));
+        assert_eq!(pinch_ratio(spread, previous), Some(2.0));
+        assert_eq!(pinch_ratio(previous, [Vec2::ZERO; 2]), None);
+        assert_eq!(pinch_ratio(previous, [Vec2::NAN; 2]), None);
+    }
+
+    #[test]
+    fn navigation_requires_every_finger_to_lift_before_drawing_resumes() {
+        let mut navigation = TouchNavigation::default();
+        let pair = [(1, Vec2::ZERO), (2, Vec2::X * 20.0)];
+        navigation.update(&pair, true, 0.016);
+        navigation.previous = Some(pair);
+        assert!(navigation.suppress_drawing);
+        navigation.update(&pair[..1], true, 0.016);
+        assert!(navigation.suppress_drawing);
+        assert!(navigation.previous.is_none());
+        // Replacing a lifted finger also cannot start a trail.
+        navigation.update(&[(3, Vec2::Y)], true, 0.016);
+        assert!(navigation.suppress_drawing);
+        navigation.update(&[], true, 0.016);
+        assert!(!navigation.suppress_drawing);
+        assert!(navigation.mouse_cooldown > 0.0);
+        navigation.update(&[], false, 0.8);
+        assert_eq!(navigation.mouse_cooldown, 0.0);
+    }
+
+    #[test]
+    fn active_touch_keeps_mouse_suppressed_and_ui_latch_survives_one_finger() {
+        let mut navigation = TouchNavigation::default();
+        navigation.update(&[(1, Vec2::ZERO)], true, 0.016);
+        assert!(!navigation.suppress_drawing);
+        // UI/tool changes latch suppression in the input system.
+        navigation.suppress_drawing = true;
+        navigation.update(&[(1, Vec2::X)], false, 2.0);
+        assert!(navigation.suppress_drawing);
+        assert_eq!(navigation.mouse_cooldown, 0.75);
+        navigation.update(&[], true, 0.016);
+        assert!(!navigation.suppress_drawing);
+    }
+
     #[test]
     fn drawn_path_samples_long_strokes_and_keeps_endpoints() {
         let mut points = Vec::new();

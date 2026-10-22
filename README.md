@@ -18,6 +18,8 @@ Each tower begins as its own faction. Each tower starts with three minions and n
 
 You control Orthanc, the orange tower. Drag with the left mouse button or draw with a finger to leave an attack trail; a click or tap leaves one marker. No minion is assigned when you draw. Orthanc's empty-handed minions discover nearby markers through their vision, follow the trail toward its end, and attack enemies in range. A trail ending on an enemy follows that target while it remains hostile; a trail ending on open ground holds its followers there. Minions carrying rawElement keep delivering it. Right-click near any marker to erase its whole attack trail, including while paused; right-clicking empty ground does nothing. If Orthanc is destroyed, you cannot place new attack trails through another tower.
 
+On phones, use one finger with **Draw** to place paths, or choose **Erase** and tap near a path to remove it. Use two fingers to pan and pinch to zoom; lift both fingers before drawing again. The compact controls provide pause, speed, restart, and the entity inspector in portrait and landscape. The battlefield fills the available viewport without page scrolling.
+
 Territory reflects current radial influence, with soft borders and neutral ground where no army or tower is present. It is not permanent paint or a tile movement system. The initial numerical balance is intentionally simple and configurable in `SimulationConfig`.
 
 | Faction | Color |

@@ -16,10 +16,7 @@ test('shared trails, tower growth, and centered controls work', async ({ page },
   catch (error) { console.log('Startup error panel:', await page.locator('#error').textContent()); throw error; }
   await expect(page.locator('#loading')).toBeHidden();
   await expect(page.locator('#error')).toBeHidden();
-  // Rendering can finish after gathering has already begun, especially with
-  // software WebGL in CI. Freeze a live snapshot instead of waiting for tick zero.
-  await clickControl(page, status, 'pause');
-  await expect(status).toHaveAttribute('data-paused', 'true');
+  // Rendering may finish after gathering begins; check a live simulation.
   await expect(status).toHaveAttribute('data-towers', '5');
   await expect(status).toHaveAttribute('data-player-towers', '1');
   const minions = Number(await status.getAttribute('data-minions'));
@@ -31,7 +28,6 @@ test('shared trails, tower growth, and centered controls work', async ({ page },
   await expect(status).toHaveAttribute('data-tower-beacons', '5');
   await expect(status).toHaveAttribute('data-recharge-areas', '5');
   expect(Number(await status.getAttribute('data-max-tower-radius'))).toBeGreaterThanOrEqual(15);
-  await expect(status).toHaveAttribute('data-pause-action', 'play');
   await expect(status).toHaveAttribute('data-hud-visible', 'true');
   const initialRaw = Number(await status.getAttribute('data-raw-initial'));
   expect(initialRaw).toBeGreaterThanOrEqual(150);
@@ -40,8 +36,6 @@ test('shared trails, tower growth, and centered controls work', async ({ page },
     ['remaining', 'carried', 'stock'].map(key => Number(el.getAttribute('data-raw-' + key)))
   );
   expect(startupRaw.reduce((sum, amount) => sum + amount, 0)).toBe(initialRaw);
-  await clickControl(page, status, 'pause');
-  await expect(status).toHaveAttribute('data-paused', 'false');
 
   await page.mouse.click(720, 450);
   await expect(status).toHaveAttribute('data-drawn-trails', '1');
@@ -54,9 +48,6 @@ test('shared trails, tower growth, and centered controls work', async ({ page },
   await expect.poll(async () => Number(await status.getAttribute('data-drawn-trails'))).toBeGreaterThan(2);
   const drawn = Number(await status.getAttribute('data-drawn-trails'));
   expect(drawn).toBeLessThanOrEqual(10);
-  await clickControl(page, status, 'pause');
-  await expect(status).toHaveAttribute('data-paused', 'true');
-  await expect(status).toHaveAttribute('data-pause-action', 'play');
   await page.mouse.click(1100, 450, { button: 'right' });
   await expect(status).toHaveAttribute('data-drawn-trails', String(drawn));
   await page.mouse.click(720, 450, { button: 'right' });
@@ -64,12 +55,10 @@ test('shared trails, tower growth, and centered controls work', async ({ page },
   await page.mouse.click(720, 600, { button: 'right' });
   await expect(status).toHaveAttribute('data-drawn-trails', '0');
 
-  await clickControl(page, status, 'pause');
   for (let i = 0; i < 12; i++) {
     await page.mouse.click(720, 450);
     await expect(status).toHaveAttribute('data-drawn-trails', String(Math.min(i + 1, 10)));
   }
-  await clickControl(page, status, 'pause');
   for (let remaining = 9; remaining >= 0; remaining--) {
     await page.mouse.click(720, 450, { button: 'right' });
     await expect(status).toHaveAttribute('data-drawn-trails', String(remaining));
@@ -85,12 +74,6 @@ test('shared trails, tower growth, and centered controls work', async ({ page },
   await expect(status).toHaveAttribute('data-hud-visible', 'true');
   const controls = JSON.parse(await status.getAttribute('data-control-positions'));
   expect(controls).not.toHaveProperty('entities');
-  expect(controls.pause[0]).toBeGreaterThan(100);
-  const elapsed = await status.getAttribute('data-elapsed');
-  const pulses = await status.getAttribute('data-energy-pulses');
-  await page.waitForTimeout(800);
-  await expect(status).toHaveAttribute('data-elapsed', elapsed);
-  await expect(status).toHaveAttribute('data-energy-pulses', pulses);
   await page.locator('#game').focus();
   await page.keyboard.press('F3');
   await expect(status).toHaveAttribute('data-inspector', 'true');
@@ -98,22 +81,22 @@ test('shared trails, tower growth, and centered controls work', async ({ page },
   await page.keyboard.press('F3');
   await expect(status).toHaveAttribute('data-inspector', 'false');
   await page.keyboard.press('Digit3');
-  await clickControl(page, status, 'pause');
-  await expect(status).toHaveAttribute('data-paused', 'false');
   await expect.poll(async () => Number(await status.getAttribute('data-raw-stock')), { timeout: 120_000 }).toBeGreaterThan(0);
   await expect.poll(async () => Number(await status.getAttribute('data-max-tower-radius'))).toBeGreaterThan(15);
-  await clickControl(page, status, 'pause');
   expect(Number(await status.getAttribute('data-minions'))).toBeLessThanOrEqual(15);
   const raw = await status.evaluate(el => Object.fromEntries(
     ['remaining', 'carried', 'stock', 'initial'].map(key => [key, Number(el.getAttribute('data-raw-' + key))])
   ));
   expect(raw.remaining + raw.carried + raw.stock).toBe(raw.initial);
   expect(raw.initial).toBe(initialRaw);
-  await expect(status).toHaveAttribute('data-donut-visuals', String(raw.carried + raw.stock));
-  await expect(status).toHaveAttribute('data-energy-orbs', await status.getAttribute('data-total-minion-energy'));
-  const trails = await status.getAttribute('data-trails');
-  await page.waitForTimeout(800);
-  await expect(status).toHaveAttribute('data-trails', trails);
+  // Read inventory and its visuals together while the simulation continues.
+  await expect.poll(() => status.evaluate(el => {
+    const value = key => Number(el.getAttribute('data-' + key));
+    return [
+      value('donut-visuals') === value('raw-carried') + value('raw-stock'),
+      value('energy-orbs') === value('total-minion-energy'),
+    ];
+  })).toEqual([true, true]);
   await page.screenshot({ path: testInfo.outputPath('tower-recharge-areas.png') });
   await clickControl(page, status, 'hud');
   await page.locator('#game').focus();

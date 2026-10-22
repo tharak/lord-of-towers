@@ -32,7 +32,7 @@ pub struct OriginTower(pub Entity);
 pub struct Tower {
     pub slot: usize,
 }
-/// The one tower whose faction accepts player-drawn trails.
+/// The one tower whose faction accepts player equipment and production commands.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerControlled;
 #[derive(Component, Debug)]
@@ -47,11 +47,13 @@ pub enum EntityKind {
     ElementDeposit,
     Trail,
     DonutVisual,
-    EnergyOrbVisual,
-    EnergyProjectile,
+    EquippedElementVisual,
+    Projectile,
     StackVisual,
     TowerBeacon,
     TowerInfluenceVisual,
+    EquipmentOrder,
+    ProductionIndicator,
     Battlefield,
     Camera,
     Light,
@@ -91,7 +93,6 @@ pub struct SimulationConfig {
     pub half_extent: f32,
     pub starting_minions: usize,
     pub tower_influence_radius: f32,
-    pub drawn_trail_capacity: usize,
     pub minion_speed: f32,
     pub minion_health: f32,
     pub tower_health: f32,
@@ -101,14 +102,9 @@ pub struct SimulationConfig {
     pub delivery_radius: f32,
     pub trail_spacing: f32,
     pub trail_lifetime: f32,
-    pub initial_energy: u8,
-    pub energy_capacity: u8,
-    pub attack_energy_cost: u8,
     pub projectile_speed: f32,
     pub projectile_lifetime: f32,
     pub pickup_radius: f32,
-    pub energy_tick_seconds: f32,
-    pub energy_recharge_ticks: u32,
 }
 impl Default for SimulationConfig {
     fn default() -> Self {
@@ -116,7 +112,6 @@ impl Default for SimulationConfig {
             half_extent: 50.0,
             starting_minions: 3,
             tower_influence_radius: 15.0,
-            drawn_trail_capacity: 10,
             minion_speed: 4.0,
             minion_health: 30.0,
             tower_health: 180.0,
@@ -126,14 +121,9 @@ impl Default for SimulationConfig {
             delivery_radius: 3.0,
             trail_spacing: 2.0,
             trail_lifetime: 30.0,
-            initial_energy: 5,
-            energy_capacity: 5,
-            attack_energy_cost: 1,
             projectile_speed: 20.0,
             projectile_lifetime: 1.5,
             pickup_radius: 1.0,
-            energy_tick_seconds: 1.0,
-            energy_recharge_ticks: 5,
         }
     }
 }
@@ -167,13 +157,15 @@ pub enum SimSet {
     Index,
     Target,
     CombatTarget,
-    TrailInput,
+    PlayerCommands,
+    EquipmentNavigation,
     Movement,
     Combat,
     Capture,
     Gathering,
     Production,
-    Energy,
+    EquipmentTransfers,
+    Attributes,
     Influence,
     Victory,
 }
@@ -188,15 +180,9 @@ pub fn simulation_delta(time: &Time<Fixed>, state: &MatchState) -> f32 {
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SimulationId(pub u64);
 
+/// A homing projectile. It follows a live hostile target and deals damage on impact.
 #[derive(Component, Clone, Copy, Debug)]
-pub struct EnergyStore {
-    pub current: u8,
-    pub capacity: u8,
-}
-
-/// A fired unit of energy. It follows a live hostile target and deals damage on impact.
-#[derive(Component, Clone, Copy, Debug)]
-pub struct EnergyProjectile {
+pub struct Projectile {
     pub target: Entity,
     pub damage: f32,
     pub speed: f32,
@@ -298,9 +284,12 @@ impl ElementStats {
         }
         stats
     }
-    /// Additive ten-percent base-stat bonuses, amplified by void points.
-    pub fn multiplier(&self, level: u32) -> f32 {
-        1.0 + 0.10 * level as f32 * (1.0 + 0.10 * self.void as f32)
+    pub fn equipped_multiplier(&self, element: Element, gear: &EquippedElements) -> f32 {
+        let counts = gear.counts();
+        let level = match element { Element::Fire => self.fire, Element::Water => self.water,
+            Element::Earth => self.earth, Element::Air => self.air, Element::Void => return 1.0 };
+        1.0 + 0.10 * level as f32 * counts[element as usize] as f32
+            * (1.0 + 0.10 * self.void as f32 * counts[Element::Void as usize] as f32)
     }
 }
 #[derive(Component, Clone, Copy, Debug)]
@@ -325,32 +314,9 @@ pub struct Trail {
     pub sequence: u32,
     pub remaining: f32,
 }
-/// Origin metadata for the player marker budget and whole-stroke erasing.
-#[derive(Component, Clone, Copy, Debug)]
-pub struct PlayerDrawnTrail {
-    pub serial: u64,
-}
-
-/// Newly accepted markers from one live pointer stroke, queued for simulation.
-pub struct DrawTrailRequest {
-    pub trip: u64,
-    pub sequence_start: u32,
-    pub points: Vec<Vec2>,
-}
-
+/// Identity sequence for carrier trips.
 #[derive(Resource, Default)]
-pub struct DrawTrailRequests(pub Vec<DrawTrailRequest>);
-
-/// Shared identity sequence for carrier trips and player strokes.
-#[derive(Resource, Default)]
-pub struct TrailIds {
-    pub next_trip: u64,
-    pub next_player_marker: u64,
-}
-
-/// Locations pending erasure of the closest player-drawn stroke.
-#[derive(Resource, Default)]
-pub struct EraseTrailRequests(pub Vec<Vec2>);
+pub struct TrailIds { pub next_trip: u64 }
 
 #[derive(Resource, Debug)]
 pub struct HudVisibility {
@@ -360,14 +326,6 @@ impl Default for HudVisibility {
     fn default() -> Self {
         Self { visible: true }
     }
-}
-
-/// The battlefield tool selected by the player's touch or mouse controls.
-#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TrailTool {
-    #[default]
-    Draw,
-    Erase,
 }
 
 /// World-space camera movement and pinch scale queued by touch input.
@@ -396,12 +354,6 @@ pub struct ElementEconomy {
     pub consumed: [u32; 5],
 }
 
-#[derive(Resource, Debug, Default)]
-pub struct EnergyClock {
-    pub elapsed: f32,
-    pub pulses: u64,
-}
-
 /// Target shared by combat steering and firing, refreshed each target tick.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct CombatTarget(pub Entity);
@@ -422,3 +374,40 @@ pub struct TowerAlert {
 /// Firing alerts are drained after all attackers fire, before damage resolution.
 #[derive(Resource, Default)]
 pub struct PendingTowerAlerts(pub Vec<TowerAlert>);
+
+/// Three physical units, independent of gathering cargo and permanent birth stats.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct EquippedElements { pub slots: [Option<Element>; 3] }
+impl EquippedElements {
+    pub fn counts(&self) -> [u32; 5] {
+        let mut counts = [0; 5];
+        for element in self.slots.iter().flatten() { counts[*element as usize] += 1; }
+        counts
+    }
+}
+#[derive(Clone, Copy, Debug)]
+pub enum TowerOrderAction { Equip { slot: usize }, ReturnEquipment { slot: usize }, DeliverCargo }
+/// Reservation lives in this entity's ElementInventory, never in spendable tower stock.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct EquipmentOrder {
+    pub minion: Entity,
+    pub tower: Entity,
+    pub source_position: Vec2,
+    pub action: TowerOrderAction,
+}
+#[derive(Clone, Debug)]
+pub enum PlayerCommand {
+    Equip { minion: Entity, tower: Entity, slot: usize, element: Element },
+    ReturnEquipment { minion: Entity, tower: Entity, slot: usize },
+    DeliverCargo { minion: Entity, tower: Entity },
+    CancelOrder { minion: Entity },
+    CreateMinion { tower: Entity, counts: [u32; 5] },
+}
+#[derive(Resource, Default)]
+pub struct PlayerCommands(pub Vec<PlayerCommand>);
+#[derive(Resource, Default)]
+pub struct PlayerSelection {
+    pub entity: Option<Entity>,
+    pub slot: usize,
+    pub recipe: [u32; 5],
+}

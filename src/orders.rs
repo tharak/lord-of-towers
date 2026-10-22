@@ -16,6 +16,8 @@ enum DrawingPointer {
 struct DrawingTrail {
     pointer: Option<DrawingPointer>,
     points: Vec<Vec2>,
+    trip: Option<u64>,
+    emitted: usize,
     touch_navigation: TouchNavigation,
     tool: TrailTool,
 }
@@ -104,6 +106,8 @@ fn gather_pointer_orders(
     mut requests: ResMut<DrawTrailRequests>,
     mut cancellations: ResMut<EraseTrailRequests>,
     mut drawing: ResMut<DrawingTrail>,
+    mut ids: ResMut<TrailIds>,
+    config: Res<SimulationConfig>,
 ) {
     let touches = touches.as_deref();
     let mut active: Vec<_> = touches
@@ -155,8 +159,14 @@ fn gather_pointer_orders(
         }
         return;
     }
-    let Ok(window) = windows.single() else { return };
+    let Ok(window) = windows.single() else {
+        drawing.pointer = None;
+        drawing.points.clear();
+        return;
+    };
     let Ok((camera, transform)) = cameras.single() else {
+        drawing.pointer = None;
+        drawing.points.clear();
         return;
     };
     let mouse = mouse.as_deref();
@@ -194,6 +204,9 @@ fn gather_pointer_orders(
         drawing.points.clear();
     }
     if drawing.pointer.is_none() {
+        drawing.trip = None;
+        drawing.emitted = 0;
+        drawing.points.clear();
         if let Some(touch) = touches.and_then(|touches| touches.iter_just_pressed().next()) {
             if *tool == TrailTool::Erase {
                 if let Some(point) = ground_point(camera, transform, touch.position()) {
@@ -224,16 +237,21 @@ fn gather_pointer_orders(
             }
         }
     }
+    if drawing.pointer.is_some() && drawing.trip.is_none() {
+        drawing.trip = Some(ids.next_trip);
+        ids.next_trip += 1;
+    }
     let mut finished = false;
     match drawing.pointer {
         Some(DrawingPointer::Mouse) => {
-            if let Some(point) = window
-                .cursor_position()
-                .and_then(|position| ground_point(camera, transform, position))
+            finished = mouse.is_none_or(|mouse| !mouse.pressed(MouseButton::Left));
+            if !finished
+                && let Some(point) = window
+                    .cursor_position()
+                    .and_then(|position| ground_point(camera, transform, position))
             {
                 append_path_point(&mut drawing.points, point);
             }
-            finished = mouse.is_none_or(|mouse| mouse.just_released(MouseButton::Left));
         }
         Some(DrawingPointer::Touch(id)) => {
             if let Some(touch) = touches.and_then(|touches| touches.get_pressed(id))
@@ -241,10 +259,7 @@ fn gather_pointer_orders(
             {
                 append_path_point(&mut drawing.points, point);
             }
-            if let Some(touch) = touches.and_then(|touches| touches.get_released(id)) {
-                if let Some(point) = ground_point(camera, transform, touch.position()) {
-                    append_path_point(&mut drawing.points, point);
-                }
+            if touches.is_some_and(|touches| touches.get_released(id).is_some()) {
                 finished = true;
             } else if touches.is_none_or(|touches| touches.just_canceled(id)) {
                 drawing.pointer = None;
@@ -253,11 +268,21 @@ fn gather_pointer_orders(
         }
         None => {}
     }
+    if let Some(trip) = drawing.trip {
+        let accepted = accepted_points(&drawing.points, config.vision_radius * 0.5);
+        if accepted.len() > drawing.emitted {
+            requests.0.push(DrawTrailRequest {
+                trip,
+                sequence_start: drawing.emitted as u32,
+                points: accepted[drawing.emitted..].to_vec(),
+            });
+            drawing.emitted = accepted.len();
+        }
+    }
     if finished {
         drawing.pointer = None;
-        if !drawing.points.is_empty() {
-            requests.0.push(std::mem::take(&mut drawing.points));
-        }
+        drawing.trip = None;
+        drawing.points.clear();
     }
     if mouse_allowed
         && mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Right))
@@ -345,10 +370,11 @@ fn erase_trails(world: &mut World) {
     crate::gathering::clean_trail_memory(world);
 }
 
-fn accepted_points(points: Vec<Vec2>, spacing: f32) -> Vec<Vec2> {
+fn accepted_points(points: &[Vec2], spacing: f32) -> Vec<Vec2> {
     let mut accepted: Vec<Vec2> = Vec::new();
     for point in points
-        .into_iter()
+        .iter()
+        .copied()
         .take(MAX_PATH_POINTS)
         .filter(|p| p.is_finite())
     {
@@ -380,17 +406,13 @@ fn apply_trails(world: &mut World) {
     if state.paused || state.browser_hidden || state.winner.is_some() {
         return;
     }
-    let spacing = world.resource::<SimulationConfig>().vision_radius * 0.5;
     let capacity = world.resource::<SimulationConfig>().drawn_trail_capacity;
     let requests = std::mem::take(&mut world.resource_mut::<DrawTrailRequests>().0);
-    for points in requests {
-        let points = accepted_points(points, spacing);
-        if points.is_empty() || capacity == 0 {
+    for request in requests {
+        if request.points.is_empty() || capacity == 0 {
             continue;
         }
-        let trip = crate::gathering::allocate_trip(world);
-        let count = points.len();
-        for (index, point) in points.into_iter().enumerate() {
+        for (index, point) in request.points.into_iter().enumerate() {
             while world.query::<&PlayerDrawnTrail>().iter(world).count() >= capacity {
                 let oldest = world
                     .query::<(Entity, &PlayerDrawnTrail)>()
@@ -406,10 +428,22 @@ fn apply_trails(world: &mut World) {
                 ids.next_player_marker += 1;
                 serial
             };
-            let entity =
-                crate::gathering::marker(world, point, owner, trip, (count - index - 1) as u32);
+            let entity = crate::gathering::marker(
+                world,
+                point,
+                owner,
+                request.trip,
+                request.sequence_start + index as u32,
+            );
             world.entity_mut(entity).insert(PlayerDrawnTrail { serial });
         }
     }
     crate::gathering::clean_trail_memory(world);
+}
+
+/// Clear pointer history when the shared trip sequence restarts, including headless matches.
+pub(crate) fn reset_drawing(world: &mut World) {
+    if let Some(mut drawing) = world.get_resource_mut::<DrawingTrail>() {
+        *drawing = DrawingTrail::default();
+    }
 }

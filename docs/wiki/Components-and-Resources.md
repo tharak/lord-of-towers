@@ -20,7 +20,7 @@
 | `Vision` | Inclusive local detection circle, base 15, initially 18.6 from air/void bonuses. |
 | `GatheringState` | Exploring, Following { trip, sequence }, or Returning { tower }. |
 | `Trail` | Shared carrier/player trip, path sequence and remaining lifetime, default 30 seconds. Highest remaining lifetime wins navigation selection. |
-| `TrailEmitter` | Carrier trip, next sequence and last marker position; emission spacing two. |
+| `TrailEmitter` | Carrier trip, next sequence and last emission position; every two traveled units refresh the nearest friendly marker within two units or create one. |
 | `PlayerDrawnTrail` | Serial provenance for the ten-marker global budget and whole-stroke erase; no separate navigation behavior. |
 | `VisitedTrailMarkers` | Private per-minion reached/bypassed marker identities. Choosing a trail marks every other visible friendly marker visited; the chosen marker is recorded on arrival. Pruned when markers disappear. |
 | `EnergyStore` | Combat energy initially five, capacity five; friendly tower circles recharge one per pulse. |
@@ -49,10 +49,10 @@ Visual components hold no inventory or energy and use Bevy primitive meshes. Chi
 | Name | Meaning |
 |---|---|
 | `SimulationConfig` | World, seed, combat, gathering, trail and energy tuning; tower_influence_radius=15, drawn_trail_capacity=10, energy_recharge_ticks=5. |
-| `DrawTrailRequests` | Completed ordered world-space strokes queued for placement. |
+| `DrawTrailRequests` | Incremental DrawTrailRequest { trip, sequence_start, points } batches queued on press and during dragging, retaining one trip and sequence order per stroke. |
 | `EraseTrailRequests` | World locations requesting whole player-stroke erasure within two units of marker/segment. |
 | `TrailIds` | Shared next_trip for both producers and next_player_marker serial; reset on restart. |
-| `DrawingTrail` | Private bounded in-progress pointer samples, touch suppression and tool state. |
+| `DrawingTrail` | Private bounded live stroke samples/spacing memory, touch suppression, trip/sequence and tool state. Reset on restart. |
 | `TrailTool, CameraGesture` | Draw/Erase selection and queued two-finger pan/pinch. |
 | `HudVisibility` | HUD choice retained across restart and orientation changes. |
 | `MatchState, FactionEntities` | Pause/speed/hidden tab/winner/restart/elapsed state and faction IDs. |

@@ -11,7 +11,7 @@
 | **tower beacon** | Sphere atop health cubes, supporting the donut crown. | `TowerBeacon` |
 | **stack** | Visual layout of one cube per tower health point or torus per deposit unit. | `Stack / StackVisual` |
 | **minion** | Mobile unit with local vision, combat energy and at most one element cargo. | `Minion` |
-| **trail** | Shared temporary faction breadcrumb from a carrier or player stroke. Followers choose the highest remaining lifetime among visible unvisited friendly markers; all markers expire after 30 simulation seconds. | `Trail` |
+| **trail** | Shared temporary faction breadcrumb from a carrier or player stroke. Followers choose the highest remaining lifetime among visible unvisited friendly markers; markers expire after 30 simulation seconds unless refreshed by a nearby carrier. | `Trail` |
 | **player marker** | Trail provenance for oldest-first ten-marker global budget and whole-stroke erasing. Same navigation/rendering as carrier markers. | `PlayerDrawnTrail` |
 | **tower defense alert** | A tower tells friendly minions inside its influence circle to attack its firing enemy, provided the enemy is visible to each recipient. | `TowerDefenseTarget` |
 | **combat target** | Selected enemy shared by movement and shooting; closest visible enemy normally, alerted attacker during defense. | `CombatTarget` |

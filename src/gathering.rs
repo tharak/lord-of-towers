@@ -85,8 +85,6 @@ pub fn spawn_deposits(commands: &mut Commands, config: &SimulationConfig) {
     }
     commands.insert_resource(runtime);
     commands.insert_resource(TrailIds::default());
-    commands.insert_resource(DrawTrailRequests::default());
-    commands.insert_resource(EraseTrailRequests::default());
     commands.insert_resource(ElementEconomy {
         initial: total,
         consumed: [0; 5],
@@ -461,8 +459,16 @@ fn collect(world: &mut World) {
     }
 }
 fn deliver(world: &mut World) {
+    let ordered: HashSet<Entity> = world
+        .query::<&EquipmentOrder>()
+        .iter(world)
+        .map(|o| o.minion)
+        .collect();
     let radius = world.resource::<SimulationConfig>().delivery_radius;
     for entity in units(world) {
+        if ordered.contains(&entity) {
+            continue;
+        }
         let Some(GatheringState::Returning { tower: Some(tower) }) =
             world.get::<GatheringState>(entity).copied()
         else {

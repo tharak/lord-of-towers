@@ -8,7 +8,6 @@ pub struct PresentationPlugin;
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.055)))
-            .init_resource::<TrailTool>()
             .init_resource::<HudVisibility>()
             .init_resource::<CameraGesture>()
             .add_systems(Startup, setup)
@@ -32,7 +31,8 @@ impl Plugin for PresentationPlugin {
                     attach_visuals,
                     sync_stacks,
                     sync_donut_visuals,
-                    sync_energy_orbs,
+                    sync_equipped_visuals,
+                    sync_production_indicators,
                     attach_projectile_visuals,
                     sync_projectile_visuals,
                     sync_visuals,
@@ -59,7 +59,7 @@ struct VisualAssets {
     donut: Handle<Mesh>,
     influence_ring: Handle<Mesh>,
     influence_materials: Vec<Handle<StandardMaterial>>,
-    energy: Handle<Mesh>,
+    sphere: Handle<Mesh>,
     elements: [Handle<StandardMaterial>; 5],
     trail_materials: Vec<Vec<Handle<StandardMaterial>>>,
     materials: Vec<Handle<StandardMaterial>>,
@@ -67,7 +67,12 @@ struct VisualAssets {
 #[derive(Component)]
 struct DonutVisual;
 #[derive(Component)]
-struct EnergyOrbVisual;
+struct EquippedElementVisual {
+    slot: usize,
+    element: Element,
+}
+#[derive(Component)]
+struct ProductionIndicator;
 const TRAIL_BUCKETS: usize = 8;
 
 #[derive(Component)]
@@ -95,7 +100,6 @@ enum Control {
     Speed(f32),
     Restart,
     Hud,
-    Tool(TrailTool),
 }
 
 fn setup(
@@ -164,7 +168,7 @@ fn setup(
                 })
             })
             .collect(),
-        energy: meshes.add(Sphere::new(0.2)),
+        sphere: meshes.add(Sphere::new(0.2)),
         elements: Element::ALL.map(|element| {
             materials.add(StandardMaterial {
                 base_color: element.color(),
@@ -256,7 +260,7 @@ fn setup(
                 DesktopDetail,
                 EntityKind::Ui,
                 Text::new(
-                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nDrag/touch: draw trail   Right click near trail: erase",
+                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nSelect your tower or minions to manage equipment",
                 ),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -302,8 +306,6 @@ fn setup(
         .with_children(|parent| {
             for (label, control) in [
                 ("Pause", Control::Pause),
-                ("Draw", Control::Tool(TrailTool::Draw)),
-                ("Erase", Control::Tool(TrailTool::Erase)),
                 ("1x", Control::Speed(1.0)),
                 ("2x", Control::Speed(2.0)),
                 ("4x", Control::Speed(4.0)),
@@ -471,7 +473,7 @@ fn sync_stacks(world: &mut World) {
                 || assets.elements[Element::Fire as usize].clone(),
                 |f| assets.materials[f.index].clone(),
             );
-        let beacon_mesh = assets.energy.clone();
+        let beacon_mesh = assets.sphere.clone();
         let element_materials = assets.elements.clone();
         let children: Vec<_> = world
             .get::<Children>(parent)
@@ -611,56 +613,111 @@ fn sync_donut_visuals(world: &mut World) {
         }
     }
 }
-// Keep energy separate from the element crown, in rings around the body.
-fn energy_orb_transform(index: usize) -> Transform {
-    let angle = (index % 8) as f32 * std::f32::consts::TAU / 8.0;
-    Transform::from_xyz(
-        angle.cos() * 0.95,
-        0.15 + (index / 8) as f32 * 0.45,
-        angle.sin() * 0.95,
-    )
+// Equipment is independent of the carried cargo crown.
+fn equipped_transform(slot: usize) -> Transform {
+    let angle = slot as f32 * std::f32::consts::TAU / 3.0;
+    Transform::from_xyz(angle.cos() * 0.95, 0.35, angle.sin() * 0.95)
 }
 
-fn sync_energy_orbs(world: &mut World) {
-    let mesh = world.resource::<VisualAssets>().energy.clone();
+fn sync_equipped_visuals(world: &mut World) {
     let inventories: Vec<_> = world
-        .query_filtered::<(Entity, &EnergyStore, &Allegiance), With<Minion>>()
+        .query_filtered::<(Entity, &EquippedElements), With<Minion>>()
         .iter(world)
-        .map(|(entity, store, allegiance)| (entity, usize::from(store.current), allegiance.0))
+        .map(|(entity, gear)| (entity, gear.slots))
         .collect();
-    for (parent, count, faction_entity) in inventories {
-        let Some(faction) = world.get::<Faction>(faction_entity) else {
-            continue;
-        };
-        let material = world.resource::<VisualAssets>().materials[faction.index].clone();
-        let mut children: Vec<_> = world
+    for (parent, slots) in inventories {
+        let children: Vec<_> = world
             .get::<Children>(parent)
             .map(|children| {
                 children
                     .iter()
-                    .filter(|child| world.get::<EnergyOrbVisual>(*child).is_some())
+                    .filter(|child| world.get::<EquippedElementVisual>(*child).is_some())
                     .collect()
             })
             .unwrap_or_default();
-        let retained = count.min(children.len());
-        for child in children.drain(retained..) {
+        // Three bounded children are rebuilt only when the slot layout changes.
+        let expected: Vec<_> = slots
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, element)| element.map(|element| (slot, element)))
+            .collect();
+        let unchanged = children.len() == expected.len()
+            && children
+                .iter()
+                .zip(&expected)
+                .all(|(child, (slot, element))| {
+                    world
+                        .get::<EquippedElementVisual>(*child)
+                        .is_some_and(|visual| visual.slot == *slot && visual.element == *element)
+                });
+        if unchanged {
+            continue;
+        }
+        for child in children {
             world.despawn(child);
         }
-        for (index, child) in children.iter().enumerate() {
-            world.entity_mut(*child).insert((
-                energy_orb_transform(index),
-                MeshMaterial3d(material.clone()),
+        for (slot, element) in expected {
+            let assets = world.resource::<VisualAssets>();
+            let mesh = assets.sphere.clone();
+            let material = assets.elements[element as usize].clone();
+            world.spawn((
+                Name::new(format!("Equipped {} slot {}", element.name(), slot + 1)),
+                EntityKind::EquippedElementVisual,
+                EquippedElementVisual { slot, element },
+                MatchEntity,
+                ChildOf(parent),
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                equipped_transform(slot),
             ));
         }
-        for index in children.len()..count {
+    }
+}
+
+fn sync_production_indicators(world: &mut World) {
+    let towers: Vec<_> = world
+        .query_filtered::<(
+            Entity,
+            &ElementInventory,
+            Option<&PlayerControlled>,
+            Option<&Health>,
+        ), With<Tower>>()
+        .iter(world)
+        .map(|(entity, stock, player, health)| {
+            (
+                entity,
+                player.is_some() && stock.total() >= ELEMENTS_PER_MINION,
+                tower_top(health) + 1.6,
+            )
+        })
+        .collect();
+    for (parent, available, height) in towers {
+        let existing = world.get::<Children>(parent).and_then(|children| {
+            children
+                .iter()
+                .find(|child| world.get::<ProductionIndicator>(*child).is_some())
+        });
+        if !available {
+            if let Some(child) = existing {
+                world.despawn(child);
+            }
+        } else if let Some(child) = existing {
+            world
+                .entity_mut(child)
+                .insert(Transform::from_xyz(0.0, height, 0.0).with_scale(Vec3::splat(2.0)));
+        } else {
+            let assets = world.resource::<VisualAssets>();
+            let mesh = assets.sphere.clone();
+            let material = assets.elements[Element::Air as usize].clone();
             world.spawn((
-                Name::new(format!("Stored energy sphere {}", index + 1)),
-                EntityKind::EnergyOrbVisual,
-                EnergyOrbVisual,
+                Name::new("Create minion available"),
+                EntityKind::ProductionIndicator,
+                ProductionIndicator,
+                MatchEntity,
                 ChildOf(parent),
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                energy_orb_transform(index),
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::from_xyz(0.0, height, 0.0).with_scale(Vec3::splat(2.0)),
             ));
         }
     }
@@ -670,12 +727,12 @@ fn attach_projectile_visuals(
     mut commands: Commands,
     assets: Res<VisualAssets>,
     factions: Query<&Faction>,
-    projectiles: Query<(Entity, &Allegiance), (With<EnergyProjectile>, Without<Mesh3d>)>,
+    projectiles: Query<(Entity, &Allegiance), (With<Projectile>, Without<Mesh3d>)>,
 ) {
     for (entity, allegiance) in &projectiles {
         if let Ok(faction) = factions.get(allegiance.0) {
             commands.entity(entity).insert((
-                Mesh3d(assets.energy.clone()),
+                Mesh3d(assets.sphere.clone()),
                 MeshMaterial3d(assets.materials[faction.index].clone()),
                 Transform::default(),
             ));
@@ -683,9 +740,7 @@ fn attach_projectile_visuals(
     }
 }
 
-fn sync_projectile_visuals(
-    mut projectiles: Query<(&Position, &mut Transform), With<EnergyProjectile>>,
-) {
+fn sync_projectile_visuals(mut projectiles: Query<(&Position, &mut Transform), With<Projectile>>) {
     for (position, mut transform) in &mut projectiles {
         transform.translation = Vec3::new(position.0.x, 1.0, position.0.y);
     }
@@ -892,9 +947,8 @@ fn button_controls(
     mut buttons: Query<(Ref<Interaction>, &Control, &mut BackgroundColor)>,
     mut state: ResMut<MatchState>,
     mut hud: ResMut<HudVisibility>,
-    mut tool: ResMut<TrailTool>,
 ) {
-    // Act only on a new press while updating selected tool colors every frame.
+    // Act only on a new press while updating button colors every frame.
     for (interaction, control, mut color) in &mut buttons {
         if *interaction == Interaction::Pressed && interaction.is_changed() {
             match control {
@@ -902,13 +956,9 @@ fn button_controls(
                 Control::Speed(speed) => state.speed = *speed,
                 Control::Restart => state.restart_requested = true,
                 Control::Hud => hud.visible = !hud.visible,
-                Control::Tool(selected) => *tool = *selected,
             }
         }
-        let selected = matches!(control, Control::Tool(selected) if *selected == *tool);
-        color.0 = if selected {
-            Color::srgb(0.12, 0.4, 0.48)
-        } else if *interaction == Interaction::None {
+        color.0 = if *interaction == Interaction::None {
             Color::srgb(0.13, 0.17, 0.23)
         } else {
             Color::srgb(0.24, 0.32, 0.43)
@@ -987,7 +1037,6 @@ fn update_hud(
 fn browser_mobile_state() {}
 #[cfg(target_arch = "wasm32")]
 fn browser_mobile_state(
-    tool: Res<TrailTool>,
     windows: Query<&Window>,
     cameras: Query<(&Transform, &Projection), With<SpectatorCamera>>,
 ) {
@@ -997,13 +1046,6 @@ fn browser_mobile_state(
     else {
         return;
     };
-    let _ = status.set_attribute(
-        "data-trail-tool",
-        match *tool {
-            TrailTool::Draw => "draw",
-            TrailTool::Erase => "erase",
-        },
-    );
     if let Some(window) = windows.iter().next() {
         let _ = status.set_attribute(
             "data-mobile-layout",
@@ -1035,11 +1077,8 @@ fn browser_state(
     inventories: Query<(&ElementInventory, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>,
     trails: Query<(), With<Trail>>,
     economy: Res<ElementEconomy>,
-    drawn: Query<(), With<PlayerDrawnTrail>>,
-    stores: Query<&EnergyStore, With<Minion>>,
-    clock: Res<EnergyClock>,
-    energy_orbs: Query<(), With<EnergyOrbVisual>>,
-    projectiles: Query<(), With<EnergyProjectile>>,
+    equipped_visuals: Query<(), With<EquippedElementVisual>>,
+    projectiles: Query<(), With<Projectile>>,
     order_visuals: Query<&EntityKind, Or<(With<StackPiece>, With<TowerBeacon>)>>,
 ) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
@@ -1115,17 +1154,10 @@ fn browser_state(
                     .to_string(),
             ),
             ("data-trails", trails.iter().count().to_string()),
-            ("data-drawn-trails", drawn.iter().count().to_string()),
             (
-                "data-total-minion-energy",
-                stores
-                    .iter()
-                    .map(|store| u64::from(store.current))
-                    .sum::<u64>()
-                    .to_string(),
+                "data-equipped-visuals",
+                equipped_visuals.iter().count().to_string(),
             ),
-            ("data-energy-pulses", clock.pulses.to_string()),
-            ("data-energy-orbs", energy_orbs.iter().count().to_string()),
             (
                 "data-stack-pieces",
                 order_visuals
@@ -1142,10 +1174,7 @@ fn browser_state(
                     .count()
                     .to_string(),
             ),
-            (
-                "data-energy-projectiles",
-                projectiles.iter().count().to_string(),
-            ),
+            ("data-projectiles", projectiles.iter().count().to_string()),
         ] {
             let _ = status.set_attribute(key, &value);
         }
@@ -1306,7 +1335,7 @@ fn sync_tower_influence_visuals(world: &mut World) {
                 .insert((transform, MeshMaterial3d(material)));
         } else {
             world.spawn((
-                Name::new("Tower recharge area"),
+                Name::new("Tower influence area"),
                 EntityKind::TowerInfluenceVisual,
                 TowerInfluenceVisual,
                 ChildOf(parent),
@@ -1341,8 +1370,6 @@ fn browser_control_positions(
         }
         let key = match control {
             Control::Pause => "pause",
-            Control::Tool(TrailTool::Draw) => "draw",
-            Control::Tool(TrailTool::Erase) => "erase",
             Control::Hud => "hud",
             Control::Restart => "restart",
             Control::Speed(speed) if *speed == 1.0 => "1x",
@@ -1365,7 +1392,7 @@ fn browser_control_positions(
         "data-pause-action",
         if state.paused { "play" } else { "pause" },
     );
-    let _ = status.set_attribute("data-recharge-areas", &areas.iter().count().to_string());
+    let _ = status.set_attribute("data-influence-areas", &areas.iter().count().to_string());
     let _ = status.set_attribute(
         "data-max-tower-radius",
         &towers

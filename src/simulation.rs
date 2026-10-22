@@ -24,16 +24,18 @@ impl Plugin for SimulationPlugin {
                 FixedUpdate,
                 (
                     SimSet::Spawn,
+                    SimSet::PlayerCommands,
                     SimSet::Index,
                     SimSet::Target,
+                    SimSet::EquipmentNavigation,
                     SimSet::CombatTarget,
-                    SimSet::TrailInput,
                     SimSet::Movement,
                     SimSet::Combat,
                     SimSet::Capture,
                     SimSet::Gathering,
+                    SimSet::EquipmentTransfers,
                     SimSet::Production,
-                    SimSet::Energy,
+                    SimSet::Attributes,
                     SimSet::Influence,
                     SimSet::Victory,
                 )
@@ -68,10 +70,10 @@ impl Plugin for SimulationPlugin {
 }
 
 #[derive(Resource, Default)]
-struct SpawnSequence(u64);
+pub(crate) struct SpawnSequence(u64);
 
 #[derive(Resource)]
-struct RandomStream(u64);
+pub(crate) struct RandomStream(u64);
 impl RandomStream {
     fn unit(&mut self) -> f32 {
         // SplitMix64 also handles seed zero. This sequence is platform-independent.
@@ -96,7 +98,7 @@ struct Neighbor {
 }
 
 #[derive(Resource, Default)]
-struct SpatialIndex(HashMap<(i32, i32), Vec<Neighbor>>);
+pub(crate) struct SpatialIndex(HashMap<(i32, i32), Vec<Neighbor>>);
 impl SpatialIndex {
     const CELL: f32 = 8.0;
     fn cell(position: Vec2) -> (i32, i32) {
@@ -117,7 +119,7 @@ impl SpatialIndex {
 }
 
 #[derive(Resource, Default)]
-struct PendingDamage(HashMap<Entity, [f32; 5]>);
+pub(crate) struct PendingDamage(HashMap<Entity, [f32; 5]>);
 
 fn setup_match(
     mut commands: Commands,
@@ -196,7 +198,7 @@ fn create_match(
     crate::gathering::spawn_deposits(commands, config);
 }
 
-fn restart_match(
+pub(crate) fn restart_match(
     mut commands: Commands,
     mut state: ResMut<MatchState>,
     config: Res<SimulationConfig>,
@@ -208,7 +210,9 @@ fn restart_match(
     mut alerts: ResMut<PendingTowerAlerts>,
     field: Option<ResMut<InfluenceField>>,
     mut sequence: ResMut<SpawnSequence>,
-    energy_clock: Option<ResMut<EnergyClock>>,
+    mut player_commands: ResMut<PlayerCommands>,
+    mut selection: ResMut<PlayerSelection>,
+    mut trails: ResMut<TrailIds>,
 ) {
     if !state.restart_requested {
         return;
@@ -225,9 +229,9 @@ fn restart_match(
     damage.0.clear();
     alerts.0.clear();
     sequence.0 = 5;
-    if let Some(mut clock) = energy_clock {
-        *clock = EnergyClock::default();
-    }
+    player_commands.0.clear();
+    *selection = PlayerSelection::default();
+    *trails = TrailIds::default();
     if let Some(mut field) = field {
         field.clear();
     }
@@ -238,14 +242,13 @@ fn restart_match(
         &mut random,
         &mut sequence,
     );
-    commands.queue(crate::orders::reset_drawing);
 }
 
 fn advance_clock(time: Res<Time<Fixed>>, mut state: ResMut<MatchState>) {
     state.elapsed += simulation_delta(&time, &state);
 }
 
-fn spawn_minion(
+pub(crate) fn spawn_minion(
     commands: &mut Commands,
     config: &SimulationConfig,
     random: &mut RandomStream,
@@ -262,18 +265,15 @@ fn spawn_minion(
     );
     let stable_id = sequence.0;
     sequence.0 += 1;
-    let health = config.minion_health * stats.multiplier(stats.earth);
+    let health = config.minion_health;
     commands.spawn((
         (
             SimulationId(stable_id),
             stats,
-            EnergyStore {
-                current: config.initial_energy.min(config.energy_capacity),
-                capacity: config.energy_capacity,
-            },
+            EquippedElements::default(),
             ElementInventory::default(),
             Vision {
-                radius: config.vision_radius * stats.multiplier(stats.air),
+                radius: config.vision_radius,
             },
             GatheringState::Exploring,
             ShootingPause::default(),
@@ -291,12 +291,12 @@ fn spawn_minion(
                 max: health,
             },
             Movement {
-                speed: config.minion_speed * stats.multiplier(stats.water),
+                speed: config.minion_speed,
                 target: location + direction,
                 retarget_in: 0.0,
             },
             Attack {
-                damage: 10.0 * stats.multiplier(stats.fire),
+                damage: 10.0,
                 range: 6.0,
                 cooldown: 0.8,
                 remaining: 0.0,
@@ -325,7 +325,7 @@ fn produce_minions(
             &Health,
             &mut ElementInventory,
         ),
-        With<Tower>,
+        (With<Tower>, Without<PlayerControlled>),
     >,
 ) {
     let mut ordered: Vec<_> = towers
@@ -442,8 +442,8 @@ fn advance_projectiles(
     time: Res<Time<Fixed>>,
     state: Res<MatchState>,
     factions: Query<&Faction>,
-    targets: Query<(&Position, &Allegiance, &Health), Without<EnergyProjectile>>,
-    mut projectiles: Query<(Entity, &mut Position, &Allegiance, &mut EnergyProjectile)>,
+    targets: Query<(&Position, &Allegiance, &Health), Without<Projectile>>,
+    mut projectiles: Query<(Entity, &mut Position, &Allegiance, &mut Projectile)>,
     mut pending: ResMut<PendingDamage>,
 ) {
     let dt = simulation_delta(&time, &state);
@@ -473,11 +473,11 @@ fn advance_projectiles(
     }
 }
 
-/// Combat overrides gathering only for a visible opponent and available attack energy.
+/// Defense can chase visible attackers; delivery orders otherwise only shoot in range.
 fn select_combat_targets(
     mut commands: Commands,
     spatial: Res<SpatialIndex>,
-    config: Res<SimulationConfig>,
+    orders: Query<&EquipmentOrder>,
     towers: Query<(&Health, &Allegiance), With<Tower>>,
     mut minions: Query<
         (
@@ -485,7 +485,6 @@ fn select_combat_targets(
             &Position,
             &Allegiance,
             &Vision,
-            &EnergyStore,
             &Attack,
             Option<&ElementInventory>,
             Option<&TowerDefenseTarget>,
@@ -494,8 +493,7 @@ fn select_combat_targets(
         With<Minion>,
     >,
 ) {
-    for (entity, position, owner, vision, energy, attack, cargo, defense, movement) in &mut minions
-    {
+    for (entity, position, owner, vision, attack, cargo, defense, movement) in &mut minions {
         let visible = |target: Entity| {
             spatial
                 .nearby(position.0, vision.radius.max(0.0))
@@ -511,17 +509,14 @@ fn select_combat_targets(
         if defense.is_some() && defense_target.is_none() {
             commands.entity(entity).remove::<TowerDefenseTarget>();
         }
-        if energy.current < config.attack_energy_cost {
-            commands.entity(entity).remove::<CombatTarget>();
-            continue;
-        }
+        let ordered = orders.iter().any(|order| order.minion == entity);
         let carrying = cargo.is_some_and(|cargo| !cargo.is_empty());
         let target = defense_target.or_else(|| {
             spatial
                 .nearby(position.0, vision.radius.max(0.0))
                 .filter(|entry| entry.faction != owner.0)
                 .filter(|entry| {
-                    !carrying
+                    (!carrying && !ordered)
                         || position.0.distance(entry.position)
                             <= attack.range + if entry.tower { 2.0 } else { 0.0 }
                 })
@@ -535,7 +530,7 @@ fn select_combat_targets(
         });
         if let Some(target) = target {
             commands.entity(entity).insert(CombatTarget(target.entity));
-            if (!carrying || defense_target.is_some())
+            if ((!carrying && !ordered) || defense_target.is_some())
                 && let Some(mut movement) = movement
             {
                 let offset = target.position - position.0;
@@ -626,7 +621,6 @@ fn collect_damage(
             &Position,
             &Allegiance,
             &mut Attack,
-            &mut EnergyStore,
             &Vision,
             Option<&CombatTarget>,
         ),
@@ -636,9 +630,9 @@ fn collect_damage(
     config: Res<SimulationConfig>,
 ) {
     let dt = simulation_delta(&time, &state);
-    for (entity, position, faction, mut attack, mut energy, vision, selected) in &mut attackers {
+    for (entity, position, faction, mut attack, vision, selected) in &mut attackers {
         attack.remaining = (attack.remaining - dt).max(0.0);
-        if attack.remaining > 0.0 || energy.current < config.attack_energy_cost {
+        if attack.remaining > 0.0 {
             continue;
         }
         let Ok(faction) = factions
@@ -676,12 +670,12 @@ fn collect_damage(
                 });
             }
             commands.spawn((
-                Name::new("Energy projectile"),
-                EntityKind::EnergyProjectile,
+                Name::new("Projectile"),
+                EntityKind::Projectile,
                 MatchEntity,
                 Position(position.0),
                 Allegiance(faction.0),
-                EnergyProjectile {
+                Projectile {
                     target: target.entity,
                     damage: attack.damage,
                     speed: config.projectile_speed,
@@ -690,7 +684,6 @@ fn collect_damage(
             ));
             commands.entity(entity).insert(ShootingPause(1.0));
             attack.remaining = attack.cooldown;
-            energy.current -= config.attack_energy_cost;
         }
     }
 }
@@ -699,7 +692,12 @@ fn resolve_damage(
     mut commands: Commands,
     mut pending: ResMut<PendingDamage>,
     mut units: Query<
-        (&mut Health, &Position, Option<&ElementInventory>),
+        (
+            &mut Health,
+            &Position,
+            Option<&ElementInventory>,
+            Option<&EquippedElements>,
+        ),
         Or<(With<Tower>, With<Minion>)>,
     >,
     ids: Query<&SimulationId>,
@@ -707,7 +705,7 @@ fn resolve_damage(
     let mut hits: Vec<_> = pending.0.drain().collect();
     hits.sort_by_key(|(entity, _)| ids.get(*entity).map_or(entity.to_bits(), |id| id.0));
     for (entity, contributions) in hits {
-        let Ok((mut health, position, cargo)) = units.get_mut(entity) else {
+        let Ok((mut health, position, cargo, gear)) = units.get_mut(entity) else {
             continue;
         };
         health.current -= contributions.iter().sum::<f32>();
@@ -718,6 +716,14 @@ fn resolve_damage(
             && !cargo.is_empty()
         {
             crate::gathering::drop_cargo(&mut commands, position.0, cargo.clone());
+        }
+        if let Some(gear) = gear {
+            let inventory = ElementInventory {
+                units: gear.slots.iter().flatten().copied().collect(),
+            };
+            if !inventory.is_empty() {
+                crate::gathering::drop_cargo(&mut commands, position.0, inventory);
+            }
         }
         commands.entity(entity).despawn();
     }

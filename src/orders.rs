@@ -1,296 +1,36 @@
-//! Player destinations are simulation entities; rendering is handled separately.
+//! Friendly unit selection and contextual equipment/production controls.
 use crate::{inspector::InspectorState, model::*};
 use bevy::{prelude::*, window::PrimaryWindow};
 
-const TRAIL_ERASE_RADIUS: f32 = 2.0;
-const RAW_PATH_SPACING: f32 = 0.8;
-const MAX_PATH_POINTS: usize = 1024;
-
-#[derive(Clone, Copy)]
-enum DrawingPointer {
-    Mouse,
-    Touch(u64),
-}
-
 #[derive(Resource, Default)]
-struct DrawingTrail {
-    pointer: Option<DrawingPointer>,
-    points: Vec<Vec2>,
-    trip: Option<u64>,
-    emitted: usize,
-    touch_navigation: TouchNavigation,
-    tool: TrailTool,
-}
-
-#[derive(Default)]
-struct TouchNavigation {
-    suppress_drawing: bool,
+struct PointerState {
     previous: Option<[(u64, Vec2); 2]>,
-    mouse_cooldown: f32,
+    suppress: bool,
+    cooldown: f32,
 }
-
-impl TouchNavigation {
-    fn update(&mut self, touches: &[(u64, Vec2)], touch_event: bool, delta: f32) {
-        self.mouse_cooldown = (self.mouse_cooldown - delta).max(0.0);
-        if touch_event || !touches.is_empty() {
-            self.mouse_cooldown = 0.75;
-        }
-        if touches.len() >= 2 {
-            self.suppress_drawing = true;
-        } else {
-            self.previous = None;
-            if touches.is_empty() {
-                self.suppress_drawing = false;
-            }
-        }
-    }
+#[derive(Component)]
+struct ContextPanel;
+#[derive(Component, Clone, Debug)]
+enum ContextAction {
+    Slot(usize),
+    Recipe(usize, bool),
+    Command(PlayerCommand),
 }
+#[derive(Resource, Default)]
+struct PanelCache(String);
 
-// Browser touch taps can leave a synthetic mouse hovering over a control. During
-// touch input, hit-test the actual fingers so that hover cannot block the field.
-fn ui_blocks_pointer(
-    interaction: Interaction,
-    touches: &[(u64, Vec2)],
-    touch_mouse_cooldown: bool,
-    bounds: Rect,
-) -> bool {
-    if touch_mouse_cooldown {
-        bounds.width() > 0.0
-            && bounds.height() > 0.0
-            && touches
-                .iter()
-                .any(|(_, position)| bounds.contains(*position))
-    } else {
-        interaction != Interaction::None
-    }
-}
-
-fn pinch_ratio(previous: [Vec2; 2], current: [Vec2; 2]) -> Option<f32> {
-    let before = previous[0].distance(previous[1]);
-    let after = current[0].distance(current[1]);
-    (before.is_finite() && after.is_finite() && before > 1.0 && after > 1.0)
-        .then_some(before / after)
-}
-
-pub struct TrailInputPlugin;
-impl Plugin for TrailInputPlugin {
+pub struct PlayerInteractionPlugin;
+impl Plugin for PlayerInteractionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DrawTrailRequests>()
-            .init_resource::<EraseTrailRequests>()
-            .init_resource::<TrailIds>()
-            .init_resource::<DrawingTrail>()
-            .init_resource::<TrailTool>()
+        app.init_resource::<PlayerSelection>()
+            .init_resource::<PlayerCommands>()
             .init_resource::<CameraGesture>()
-            .add_systems(Update, (gather_pointer_orders, erase_trails).chain())
+            .init_resource::<PointerState>()
+            .init_resource::<PanelCache>()
             .add_systems(
-                FixedUpdate,
-                apply_trails
-                    .in_set(SimSet::TrailInput)
-                    .after(SimSet::Target)
-                    .before(SimSet::Movement),
+                Update,
+                (select_entity, context_actions, context_panel).chain(),
             );
-    }
-}
-
-fn gather_pointer_orders(
-    mouse: Option<Res<ButtonInput<MouseButton>>>,
-    touches: Option<Res<Touches>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    interactions: Query<(&Interaction, &ComputedNode, &UiGlobalTransform)>,
-    inspector: Option<Res<InspectorState>>,
-    state: Res<MatchState>,
-    tool: Res<TrailTool>,
-    mut gesture: ResMut<CameraGesture>,
-    time: Option<Res<Time>>,
-    mut requests: ResMut<DrawTrailRequests>,
-    mut cancellations: ResMut<EraseTrailRequests>,
-    mut drawing: ResMut<DrawingTrail>,
-    mut ids: ResMut<TrailIds>,
-    config: Res<SimulationConfig>,
-) {
-    let touches = touches.as_deref();
-    let mut active: Vec<_> = touches
-        .into_iter()
-        .flat_map(|touches| touches.iter())
-        .map(|touch| (touch.id(), touch.position()))
-        .collect();
-    active.sort_by_key(|(id, _)| *id);
-    let touch_event = touches.is_some_and(|touches| {
-        touches.iter_just_pressed().next().is_some()
-            || touches.any_just_released()
-            || touches.iter_just_canceled().next().is_some()
-    });
-    drawing.touch_navigation.update(
-        &active,
-        touch_event,
-        time.as_ref().map_or(1.0 / 60.0, |time| time.delta_secs()),
-    );
-    let tool_changed = drawing.tool != *tool;
-    drawing.tool = *tool;
-    if tool_changed {
-        drawing.pointer = None;
-        drawing.points.clear();
-        if !active.is_empty() {
-            drawing.touch_navigation.suppress_drawing = true;
-        }
-    }
-    if state.restart_requested
-        || state.browser_hidden
-        || state.winner.is_some()
-        || inspector.is_some_and(|inspector| inspector.open)
-        || interactions.iter().any(|(interaction, node, transform)| {
-            ui_blocks_pointer(
-                *interaction,
-                &active,
-                drawing.touch_navigation.mouse_cooldown > 0.0,
-                Rect::from_center_size(
-                    transform.translation * node.inverse_scale_factor(),
-                    node.size() * node.inverse_scale_factor(),
-                ),
-            )
-        })
-    {
-        drawing.pointer = None;
-        drawing.points.clear();
-        drawing.touch_navigation.previous = None;
-        if !active.is_empty() {
-            drawing.touch_navigation.suppress_drawing = true;
-        }
-        return;
-    }
-    let Ok(window) = windows.single() else {
-        drawing.pointer = None;
-        drawing.points.clear();
-        return;
-    };
-    let Ok((camera, transform)) = cameras.single() else {
-        drawing.pointer = None;
-        drawing.points.clear();
-        return;
-    };
-    let mouse = mouse.as_deref();
-    if active.len() >= 2 {
-        drawing.pointer = None;
-        drawing.points.clear();
-        let current = [active[0], active[1]];
-        if let Some(previous) = drawing.touch_navigation.previous
-            && previous[0].0 == current[0].0
-            && previous[1].0 == current[1].0
-        {
-            let before = [previous[0].1, previous[1].1];
-            let after = [current[0].1, current[1].1];
-            if let (Some(previous_ground), Some(current_ground)) = (
-                ground_point(camera, transform, (before[0] + before[1]) * 0.5),
-                ground_point(camera, transform, (after[0] + after[1]) * 0.5),
-            ) {
-                gesture.pan += previous_ground - current_ground;
-            }
-            if let Some(ratio) = pinch_ratio(before, after) {
-                gesture.zoom *= ratio;
-            }
-        }
-        drawing.touch_navigation.previous = Some(current);
-        return;
-    }
-    if drawing.touch_navigation.suppress_drawing {
-        drawing.pointer = None;
-        drawing.points.clear();
-        return;
-    }
-    let mouse_allowed = drawing.touch_navigation.mouse_cooldown <= 0.0;
-    if !mouse_allowed && matches!(drawing.pointer, Some(DrawingPointer::Mouse)) {
-        drawing.pointer = None;
-        drawing.points.clear();
-    }
-    if drawing.pointer.is_none() {
-        drawing.trip = None;
-        drawing.emitted = 0;
-        drawing.points.clear();
-        if let Some(touch) = touches.and_then(|touches| touches.iter_just_pressed().next()) {
-            if *tool == TrailTool::Erase {
-                if let Some(point) = ground_point(camera, transform, touch.position()) {
-                    cancellations.0.push(point);
-                }
-            } else {
-                drawing.pointer = Some(DrawingPointer::Touch(touch.id()));
-                if let Some(point) = ground_point(camera, transform, touch.position()) {
-                    append_path_point(&mut drawing.points, point);
-                }
-            }
-        } else if mouse_allowed
-            && mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Left))
-            && touches.is_none_or(|touches| !touches.any_just_released())
-        {
-            if *tool == TrailTool::Draw {
-                drawing.pointer = Some(DrawingPointer::Mouse);
-            }
-            if let Some(point) = window
-                .cursor_position()
-                .and_then(|position| ground_point(camera, transform, position))
-            {
-                if *tool == TrailTool::Erase {
-                    cancellations.0.push(point);
-                } else {
-                    append_path_point(&mut drawing.points, point);
-                }
-            }
-        }
-    }
-    if drawing.pointer.is_some() && drawing.trip.is_none() {
-        drawing.trip = Some(ids.next_trip);
-        ids.next_trip += 1;
-    }
-    let mut finished = false;
-    match drawing.pointer {
-        Some(DrawingPointer::Mouse) => {
-            finished = mouse.is_none_or(|mouse| !mouse.pressed(MouseButton::Left));
-            if !finished
-                && let Some(point) = window
-                    .cursor_position()
-                    .and_then(|position| ground_point(camera, transform, position))
-            {
-                append_path_point(&mut drawing.points, point);
-            }
-        }
-        Some(DrawingPointer::Touch(id)) => {
-            if let Some(touch) = touches.and_then(|touches| touches.get_pressed(id))
-                && let Some(point) = ground_point(camera, transform, touch.position())
-            {
-                append_path_point(&mut drawing.points, point);
-            }
-            if touches.is_some_and(|touches| touches.get_released(id).is_some()) {
-                finished = true;
-            } else if touches.is_none_or(|touches| touches.just_canceled(id)) {
-                drawing.pointer = None;
-                drawing.points.clear();
-            }
-        }
-        None => {}
-    }
-    if let Some(trip) = drawing.trip {
-        let accepted = accepted_points(&drawing.points, config.vision_radius * 0.5);
-        if accepted.len() > drawing.emitted {
-            requests.0.push(DrawTrailRequest {
-                trip,
-                sequence_start: drawing.emitted as u32,
-                points: accepted[drawing.emitted..].to_vec(),
-            });
-            drawing.emitted = accepted.len();
-        }
-    }
-    if finished {
-        drawing.pointer = None;
-        drawing.trip = None;
-        drawing.points.clear();
-    }
-    if mouse_allowed
-        && mouse.is_some_and(|mouse| mouse.just_pressed(MouseButton::Right))
-        && let Some(point) = window
-            .cursor_position()
-            .and_then(|position| ground_point(camera, transform, position))
-    {
-        cancellations.0.push(point);
     }
 }
 
@@ -298,152 +38,438 @@ fn ground_point(camera: &Camera, transform: &GlobalTransform, point: Vec2) -> Op
     let ray = camera.viewport_to_world(transform, point).ok()?;
     let distance = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))?;
     let point = ray.get_point(distance);
-    let ground = Vec2::new(point.x, point.z);
-    ground.is_finite().then_some(ground)
+    Some(Vec2::new(point.x, point.z))
 }
 
-fn append_path_point(points: &mut Vec<Vec2>, point: Vec2) {
-    if !point.is_finite() || points.len() >= MAX_PATH_POINTS {
+fn select_entity(
+    mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    time: Res<Time>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    interactions: Query<(&Interaction, &ComputedNode, &UiGlobalTransform)>,
+    inspector: Option<Res<InspectorState>>,
+    state: Res<MatchState>,
+    player: Query<&Allegiance, (With<Tower>, With<PlayerControlled>)>,
+    entities: Query<
+        (Entity, &Position, &Allegiance, &Health, Option<&Tower>),
+        Or<(With<Tower>, With<Minion>)>,
+    >,
+    mut pointer: ResMut<PointerState>,
+    mut gesture: ResMut<CameraGesture>,
+    mut selection: ResMut<PlayerSelection>,
+) {
+    let mut active: Vec<_> = touches.iter().map(|t| (t.id(), t.position())).collect();
+    active.sort_by_key(|t| t.0);
+    pointer.cooldown = (pointer.cooldown - time.delta_secs()).max(0.0);
+    if !active.is_empty()
+        || touches.any_just_released()
+        || touches.iter_just_canceled().next().is_some()
+    {
+        pointer.cooldown = 0.75;
+    }
+    if active.len() >= 2 {
+        pointer.suppress = true;
+    }
+    if active.is_empty() {
+        pointer.suppress = false;
+    }
+    if state.restart_requested
+        || state.browser_hidden
+        || state.winner.is_some()
+        || inspector.is_some_and(|s| s.open)
+        || interactions.iter().any(|(interaction, node, transform)| {
+            if pointer.cooldown > 0.0 {
+                let bounds = Rect::from_center_size(
+                    transform.translation * node.inverse_scale_factor(),
+                    node.size() * node.inverse_scale_factor(),
+                );
+                active.iter().any(|(_, p)| bounds.contains(*p))
+            } else {
+                *interaction != Interaction::None
+            }
+        })
+    {
+        pointer.previous = None;
+        if !active.is_empty() {
+            pointer.suppress = true;
+        }
         return;
     }
-    let Some(start) = points.last().copied() else {
-        points.push(point);
+    let Ok((camera, transform)) = cameras.single() else {
         return;
     };
-    let distance = start.distance(point);
-    if distance < 0.001 {
-        return;
-    }
-    let steps = (distance / RAW_PATH_SPACING).ceil() as usize;
-    for step in 1..=steps.min(MAX_PATH_POINTS - points.len()) {
-        points.push(start.lerp(point, step as f32 / steps as f32));
-    }
-}
-
-// Erasing remains responsive while paused. Only player markers participate.
-fn erase_trails(world: &mut World) {
-    let points = std::mem::take(&mut world.resource_mut::<EraseTrailRequests>().0);
-    if world.resource::<MatchState>().restart_requested {
-        world.resource_mut::<DrawTrailRequests>().0.clear();
-        return;
-    }
-    for point in points.into_iter().filter(|p| p.is_finite()) {
-        let markers: Vec<_> = world
-            .query_filtered::<(Entity, &Trail, &Position), With<PlayerDrawnTrail>>()
-            .iter(world)
-            .map(|(e, t, p)| (e, *t, p.0))
-            .collect();
-        let nearest = markers
-            .iter()
-            .map(|(entity, trail, position)| {
-                // Consecutive surviving markers define a segment even after budget eviction.
-                let previous = markers
-                    .iter()
-                    .filter(|(_, other, _)| {
-                        other.trip == trail.trip && other.sequence > trail.sequence
-                    })
-                    .min_by_key(|(_, other, _)| other.sequence);
-                let distance = previous.map_or_else(
-                    || position.distance_squared(point),
-                    |(_, _, start)| {
-                        let offset = *position - *start;
-                        let t = if offset.length_squared() > 0.0 {
-                            ((point - *start).dot(offset) / offset.length_squared()).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        (*start + offset * t).distance_squared(point)
-                    },
-                );
-                (*entity, trail.trip, distance)
-            })
-            .filter(|(_, _, d)| *d <= TRAIL_ERASE_RADIUS.powi(2))
-            .min_by(|a, b| a.2.total_cmp(&b.2).then(a.0.to_bits().cmp(&b.0.to_bits())));
-        if let Some((_, trip, _)) = nearest {
-            for (entity, trail, _) in markers {
-                if trail.trip == trip {
-                    world.despawn(entity);
-                }
+    if active.len() >= 2 {
+        let current = [active[0], active[1]];
+        if let Some(previous) = pointer.previous
+            && previous[0].0 == current[0].0
+            && previous[1].0 == current[1].0
+        {
+            if let (Some(before), Some(after)) = (
+                ground_point(camera, transform, (previous[0].1 + previous[1].1) * 0.5),
+                ground_point(camera, transform, (current[0].1 + current[1].1) * 0.5),
+            ) {
+                gesture.pan += before - after;
+            }
+            let before = previous[0].1.distance(previous[1].1);
+            let after = current[0].1.distance(current[1].1);
+            if before > 1.0 && after > 1.0 {
+                gesture.zoom *= before / after;
             }
         }
-    }
-    crate::gathering::clean_trail_memory(world);
-}
-
-fn accepted_points(points: &[Vec2], spacing: f32) -> Vec<Vec2> {
-    let mut accepted: Vec<Vec2> = Vec::new();
-    for point in points
-        .iter()
-        .copied()
-        .take(MAX_PATH_POINTS)
-        .filter(|p| p.is_finite())
-    {
-        if accepted
-            .iter()
-            .all(|previous| previous.distance(point) >= spacing)
-        {
-            accepted.push(point);
-        }
-    }
-    accepted
-}
-
-fn apply_trails(world: &mut World) {
-    erase_trails(world);
-    if world.resource::<MatchState>().restart_requested {
+        pointer.previous = Some(current);
         return;
     }
-    let player = world
+    pointer.previous = None;
+    if pointer.suppress {
+        return;
+    }
+    let position = touches
+        .iter_just_pressed()
+        .next()
+        .map(|t| t.position())
+        .or_else(|| {
+            (pointer.cooldown <= 0.0 && mouse.just_pressed(MouseButton::Left))
+                .then(|| windows.single().ok().and_then(Window::cursor_position))
+                .flatten()
+        });
+    let Some(position) = position else {
+        return;
+    };
+    let Some(owner) = player.iter().next() else {
+        return;
+    };
+    selection.entity = entities
+        .iter()
+        .filter(|(_, _, allegiance, health, _)| *allegiance == owner && health.current > 0.0)
+        .filter_map(|(entity, point, _, _, tower)| {
+            let screen = camera
+                .world_to_viewport(
+                    transform,
+                    Vec3::new(
+                        point.0.x,
+                        if tower.is_some() { 2.0 } else { 0.5 },
+                        point.0.y,
+                    ),
+                )
+                .ok()?;
+            let distance = screen.distance_squared(position);
+            (distance
+                <= if tower.is_some() {
+                    38.0_f32.powi(2)
+                } else {
+                    28.0_f32.powi(2)
+                })
+            .then_some((entity, distance))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(e, _)| e);
+}
+
+fn context_actions(
+    actions: Query<(&Interaction, &ContextAction), Changed<Interaction>>,
+    mut selection: ResMut<PlayerSelection>,
+    mut commands: ResMut<PlayerCommands>,
+    state: Res<MatchState>,
+) {
+    if state.restart_requested || state.browser_hidden || state.winner.is_some() {
+        return;
+    }
+    for (interaction, action) in &actions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match action {
+            ContextAction::Slot(slot) => selection.slot = *slot,
+            ContextAction::Recipe(index, add) => {
+                if *add {
+                    selection.recipe[*index] += 1;
+                } else {
+                    selection.recipe[*index] = selection.recipe[*index].saturating_sub(1);
+                }
+            }
+            ContextAction::Command(command) => commands.0.push(command.clone()),
+        }
+    }
+}
+
+struct Row {
+    label: String,
+    action: Option<ContextAction>,
+    color: Color,
+}
+fn row(label: impl Into<String>, action: Option<ContextAction>) -> Row {
+    Row {
+        label: label.into(),
+        action,
+        color: Color::srgb(0.15, 0.19, 0.25),
+    }
+}
+
+fn context_panel(world: &mut World) {
+    let selected = world.resource::<PlayerSelection>().entity;
+    let slot = world.resource::<PlayerSelection>().slot.min(2);
+    let recipe = world.resource::<PlayerSelection>().recipe;
+    let owner = world
         .query_filtered::<&Allegiance, (With<Tower>, With<PlayerControlled>)>()
         .iter(world)
         .next()
         .copied();
-    let Some(owner) = player else {
-        world.resource_mut::<DrawTrailRequests>().0.clear();
-        return;
-    };
-    let state = world.resource::<MatchState>();
-    if state.paused || state.browser_hidden || state.winner.is_some() {
-        return;
+    let valid = selected.filter(|e| {
+        world.get::<Health>(*e).is_some_and(|h| h.current > 0.0)
+            && world.get::<Allegiance>(*e).copied() == owner
+            && owner.is_some()
+    });
+    if selected != valid {
+        world.resource_mut::<PlayerSelection>().entity = valid;
     }
-    let capacity = world.resource::<SimulationConfig>().drawn_trail_capacity;
-    let requests = std::mem::take(&mut world.resource_mut::<DrawTrailRequests>().0);
-    for request in requests {
-        if request.points.is_empty() || capacity == 0 {
-            continue;
+    let mut rows = Vec::new();
+    let mut heading = String::new();
+    let mut anchor = Vec2::ZERO;
+    let mut viewport = Vec2::new(320.0, 640.0);
+    if let Some(entity) = valid {
+        let position = world.get::<Position>(entity).unwrap().0;
+        if let Some(window) = world
+            .query_filtered::<&Window, With<PrimaryWindow>>()
+            .iter(world)
+            .next()
+        {
+            viewport = Vec2::new(window.width(), window.height());
         }
-        for (index, point) in request.points.into_iter().enumerate() {
-            while world.query::<&PlayerDrawnTrail>().iter(world).count() >= capacity {
-                let oldest = world
-                    .query::<(Entity, &PlayerDrawnTrail)>()
-                    .iter(world)
-                    .min_by_key(|(e, t)| (t.serial, e.to_bits()))
-                    .map(|(e, _)| e)
-                    .unwrap();
-                world.despawn(oldest);
+        if let Some((camera, transform)) = world
+            .query_filtered::<(&Camera, &GlobalTransform), With<Camera3d>>()
+            .iter(world)
+            .next()
+        {
+            anchor = camera
+                .world_to_viewport(transform, Vec3::new(position.x, 1.0, position.y))
+                .unwrap_or(viewport * 0.5);
+        }
+        if world.get::<Tower>(entity).is_some() {
+            heading = "Tower stock / Create minion".into();
+            let stock = world
+                .get::<ElementInventory>(entity)
+                .map_or([0; 5], ElementInventory::counts);
+            let total: u32 = recipe.iter().sum();
+            for element in Element::ALL {
+                let i = element as usize;
+                rows.push(row(
+                    format!(
+                        "{}: {} stock | {} selected",
+                        element.name(),
+                        stock[i],
+                        recipe[i]
+                    ),
+                    None,
+                ));
+                rows.push(row(
+                    format!("− {}", element.name()),
+                    (recipe[i] > 0).then_some(ContextAction::Recipe(i, false)),
+                ));
+                rows.push(row(
+                    format!("+ {}", element.name()),
+                    (total < 5 && recipe[i] < stock[i]).then_some(ContextAction::Recipe(i, true)),
+                ));
             }
-            let serial = {
-                let mut ids = world.resource_mut::<TrailIds>();
-                let serial = ids.next_player_marker;
-                ids.next_player_marker += 1;
-                serial
-            };
-            let entity = crate::gathering::marker(
-                world,
-                point,
-                owner,
-                request.trip,
-                request.sequence_start + index as u32,
-            );
-            world.entity_mut(entity).insert(PlayerDrawnTrail { serial });
+            rows.push(row(
+                format!("Create ({total}/5)"),
+                (total == 5 && (0..5).all(|i| recipe[i] <= stock[i])).then_some(
+                    ContextAction::Command(PlayerCommand::CreateMinion {
+                        tower: entity,
+                        counts: recipe,
+                    }),
+                ),
+            ));
+        } else {
+            heading = "Minion equipment".into();
+            let gear = world
+                .get::<EquippedElements>(entity)
+                .copied()
+                .unwrap_or_default();
+            let pending = world
+                .query::<&EquipmentOrder>()
+                .iter(world)
+                .find(|o| o.minion == entity)
+                .copied();
+            rows.push(row(
+                pending.map_or_else(
+                    || "No pending tower order".into(),
+                    |o| format!("Pending: {:?}", o.action),
+                ),
+                None,
+            ));
+            for i in 0..3 {
+                rows.push(row(
+                    format!(
+                        "{} Slot {}: {}",
+                        if slot == i { "›" } else { "" },
+                        i + 1,
+                        gear.slots[i].map_or("Empty", Element::name)
+                    ),
+                    Some(ContextAction::Slot(i)),
+                ));
+            }
+            let nearest = world.query_filtered::<(Entity, &Position, &Allegiance, &Health, &ElementInventory), With<Tower>>().iter(world)
+                .filter(|(_, _, a, h, _)| Some(**a) == owner && h.current > 0.0)
+                .min_by(|a, b| a.1.0.distance_squared(position).total_cmp(&b.1.0.distance_squared(position)))
+                .map(|(e, _, _, _, stock)| (e, stock.counts()));
+            for element in Element::ALL {
+                let available = nearest.map_or(0, |(_, stock)| stock[element as usize]);
+                let mut choice = row(
+                    format!("Equip {} ({available})", element.name()),
+                    nearest
+                        .filter(|_| available > 0 && pending.is_none())
+                        .map(|(tower, _)| {
+                            ContextAction::Command(PlayerCommand::Equip {
+                                minion: entity,
+                                tower,
+                                slot,
+                                element,
+                            })
+                        }),
+                );
+                choice.color = element.color();
+                rows.push(choice);
+            }
+            rows.push(row(
+                "Return selected equipment",
+                nearest
+                    .filter(|_| pending.is_none() && gear.slots[slot].is_some())
+                    .map(|(tower, _)| {
+                        ContextAction::Command(PlayerCommand::ReturnEquipment {
+                            minion: entity,
+                            tower,
+                            slot,
+                        })
+                    }),
+            ));
+            let cargo = world
+                .get::<ElementInventory>(entity)
+                .is_some_and(|i| !i.is_empty());
+            rows.push(row(
+                "Deliver cargo",
+                nearest
+                    .filter(|_| pending.is_none() && cargo)
+                    .map(|(tower, _)| {
+                        ContextAction::Command(PlayerCommand::DeliverCargo {
+                            minion: entity,
+                            tower,
+                        })
+                    }),
+            ));
+            rows.push(row(
+                "Cancel pending order",
+                pending
+                    .map(|_| ContextAction::Command(PlayerCommand::CancelOrder { minion: entity })),
+            ));
         }
     }
-    crate::gathering::clean_trail_memory(world);
-}
-
-/// Clear pointer history when the shared trip sequence restarts, including headless matches.
-pub(crate) fn reset_drawing(world: &mut World) {
-    if let Some(mut drawing) = world.get_resource_mut::<DrawingTrail>() {
-        *drawing = DrawingTrail::default();
+    let signature = format!(
+        "{valid:?}:{slot}:{recipe:?}:{heading}:{}",
+        rows.iter()
+            .map(|r| format!("{}:{:?}", r.label, r.action))
+            .collect::<String>()
+    );
+    let width = 252.0_f32.min((viewport.x - 16.0).max(1.0));
+    let row_height = ((viewport.y - 70.0) / rows.len().max(1) as f32 - 3.0).clamp(14.0, 26.0);
+    let height = (rows.len() as f32 * (row_height + 3.0) + 42.0).min((viewport.y - 16.0).max(1.0));
+    let left =
+        (anchor.x + 20.0).clamp(8.0_f32.min(viewport.x), (viewport.x - width - 8.0).max(8.0));
+    let top = (anchor.y - height * 0.5).clamp(
+        8.0_f32.min(viewport.y),
+        (viewport.y - height - 8.0).max(8.0),
+    );
+    if world.resource::<PanelCache>().0 == signature {
+        for mut node in world
+            .query_filtered::<&mut Node, With<ContextPanel>>()
+            .iter_mut(world)
+        {
+            node.left = px(left);
+            node.top = px(top);
+            node.width = px(width);
+            node.max_height = px(height);
+        }
+        return;
     }
+    world.resource_mut::<PanelCache>().0 = signature;
+    let old: Vec<_> = world
+        .query_filtered::<Entity, With<ContextPanel>>()
+        .iter(world)
+        .collect();
+    for entity in old {
+        world.despawn(entity);
+    }
+    if valid.is_none() {
+        return;
+    }
+    world
+        .spawn((
+            Name::new("Selection context panel"),
+            ContextPanel,
+            EntityKind::Ui,
+            Interaction::None,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(left),
+                top: px(top),
+                width: px(width),
+                max_height: px(height),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(px(6)),
+                row_gap: px(3),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+            GlobalZIndex(30),
+            BackgroundColor(Color::srgba(0.035, 0.045, 0.065, 0.97)),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                EntityKind::Ui,
+                Name::new("Selection heading"),
+                Text::new(heading),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
+                    ..default()
+                },
+            ));
+            for row in rows {
+                let enabled = row.action.is_some();
+                let mut item = panel.spawn((
+                    EntityKind::Ui,
+                    Name::new("Selection action"),
+                    Node {
+                        min_height: px(row_height),
+                        flex_shrink: 0.0,
+                        padding: UiRect::axes(px(6), px(0)),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(if enabled {
+                        row.color
+                    } else {
+                        Color::srgb(0.075, 0.085, 0.10)
+                    }),
+                ));
+                if let Some(action) = row.action {
+                    item.insert((Button, action));
+                }
+                item.with_children(|button| {
+                    button.spawn((
+                        EntityKind::Ui,
+                        Name::new("Selection action label"),
+                        Text::new(row.label),
+                        TextFont {
+                            font_size: FontSize::Px((row_height - 3.0).clamp(10.0, 12.0)),
+                            ..default()
+                        },
+                        TextColor(if enabled {
+                            Color::WHITE
+                        } else {
+                            Color::srgb(0.55, 0.58, 0.62)
+                        }),
+                    ));
+                });
+            }
+        });
 }

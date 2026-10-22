@@ -1,13 +1,15 @@
-# Lord of Towers: shared vocabulary
+# Lord of Towers
 
-These pages define the current Bevy ECS game contracts for issues, reviews and presentation changes.
+A Rust/Bevy ECS strategy simulation using only engine primitive meshes. [Play in the browser](https://tharak.github.io/lord-of-towers/).
 
-- [Nomenclature](Nomenclature): resources, towers, minions, shared trails and area recharge.
-- [Entities](Entities): every application kind and lifecycle.
-- [Components and Resources](Components-and-Resources): gameplay state, private visual roles and shared resources.
+- [Nomenclature](Nomenclature): agreed gameplay and mesh names.
+- [Entities](Entities): every entity kind and lifecycle.
+- [Components and Resources](Components-and-Resources): shared ECS contracts.
 
-Five towers start with three minions each. Towers consume any five delivered elements in FIFO order to create a minion; consumed types raise that newborn's corresponding elemental stats above the starting two points. Tower radius stays fixed at 15. Friendly tower circles recharge combat energy. Player and carrier markers share the same temporary Trail behavior; followers prefer the marker with the highest remaining lifetime. Towers alert nearby friendly minions when fired upon. Movement priorities are defense, cargo return, visible enemies, element deposits, trails, then exploration.
+You control Orthanc. Select a friendly minion to equip up to three physical elements from tower stock, return equipment or deliver cargo. Exchanges reserve stock immediately and require traveling home. Select the player tower to spend exactly five chosen units on a new empty-equipped minion. A sphere indicates five available units. NPCs auto-equip nearby empty slots before automatic FIFO births.
 
-The live inspector queries ECS directly and is opened with F3. It stores no second entity registry. Keep these pages aligned with the repository [entity catalog](https://github.com/tharak/lord-of-towers/blob/main/docs/entity-catalog.md), [gathering contracts](https://github.com/tharak/lord-of-towers/blob/main/docs/gathering-contracts.md) and [energy contracts](https://github.com/tharak/lord-of-towers/blob/main/docs/energy-contracts.md).
+Permanent birth stats start at two each; recipes add matching points. Equipped fire/water/earth/air activate damage/speed/health/vision bonuses and equipped void amplifies them. Duplicate gear is allowed. Element-colored spheres mean equipment; donut crowns mean cargo/stock. Shooting is free, pauses movement for one second, and damages on projectile impact. There is no energy reserve/recharge or player trail drawing.
 
-Validation is compilation only: native Rust checking and a release WebAssembly build. Pages deploys after both succeed. Automated tests and runtime smoke checks are removed; runtime issues are investigated when reported by the user.
+Carriers create and refresh temporary trails; followers prefer the freshest visible unvisited friendly marker. Defense overrides homeward travel. Towers have fixed radius 15, are destroyed at zero health, and the last surviving tower wins. F3 inspects live ECS. Hide HUD and two-finger mobile camera controls remain available.
+
+See repository [equipment contracts](https://github.com/tharak/lord-of-towers/blob/main/docs/equipment-contracts.md). Validation is native/web compilation only; no automated tests or runtime smoke checks.

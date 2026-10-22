@@ -1541,6 +1541,10 @@ mod tests {
                 Position(center + Vec2::X * 3.0),
                 Allegiance(owners[1]),
                 Vision { radius: 10.0 },
+                Health {
+                    current: 30.0,
+                    max: 30.0,
+                },
                 EnergyStore {
                     current: 5,
                     capacity: 5,
@@ -1568,7 +1572,7 @@ mod tests {
         assert_eq!(
             app.world()
                 .get::<TowerDefenseTarget>(defender)
-                .unwrap()
+                .expect("a visible living attacker should trigger defense before projectile impact")
                 .attacker,
             attacker
         );

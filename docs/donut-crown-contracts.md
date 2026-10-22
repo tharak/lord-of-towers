@@ -1,3 +1,5 @@
+> Historical implementation notes. Combat selection and navigation are superseded by the current [gathering contracts](gathering-contracts.md): closest visible enemy and tower-defense priority replace minion-first attack ordering.
+
 # Donut crown and combat contracts
 
 Tests/builds only GitHub Actions. Keep gameplay independent of meshes. The current debug HUD stays visible. `rawElement` is the resource, `donut` is a world deposit or crown piece, `torus` is the engine mesh primitive.

@@ -12,14 +12,16 @@
 | `OriginTower` | Initial creator reference, validated before use; origin death does not destroy a minion. |
 | `Position, Health, Movement` | X/Z ground position, health, steering speed and target. |
 | `Attack, ShootingPause` | Shot damage/range/cooldown and one-second movement pause after firing. Shots cost one energy. |
+| `CombatTarget` | Enemy selected for shared movement/firing decisions each tick. |
+| `TowerDefenseTarget` | Defended tower and firing attacker; valid only while the attacker is visible and both references remain valid. |
 | `EnergyProjectile` | Live hostile target, damage, speed and remaining flight lifetime; damage on impact. |
 | `RawElement` | Finite deposit quantity, cargo 0–1, or retained tower stock. No visual child holds it. |
 | `Vision` | Inclusive local detection circle, default 15. |
 | `GatheringState` | Exploring, Following { trip, sequence }, or Returning { tower }. |
-| `Trail` | Shared carrier/player trip, decreasing-follow sequence and remaining lifetime, default 30 seconds. |
+| `Trail` | Shared carrier/player trip, path sequence and remaining lifetime, default 30 seconds. Highest remaining lifetime wins navigation selection. |
 | `TrailEmitter` | Carrier trip, next sequence and last marker position; emission spacing two. |
 | `PlayerDrawnTrail` | Serial provenance for the ten-marker global budget and whole-stroke erase; no separate navigation behavior. |
-| `VisitedTrails` | Private gathering memory avoiding exhausted trips; pruned when trips disappear. |
+| `VisitedTrailMarkers` | Private per-minion reached-marker identities, preventing repeat visits; pruned when markers disappear. |
 | `EnergyStore` | Combat energy initially five, capacity five; friendly tower circles recharge one per pulse. |
 | `InfluenceEmitter` | Finite radial territory contribution. Tower radius defaults to 15 + retained stock. |
 
@@ -58,9 +60,12 @@ Visual components hold no inventory or energy and use Bevy primitive meshes. Chi
 | `InfluenceField` | Bounded territory samples and percentages; not recharge authority. |
 | `InspectorState, InspectorFilter` | Inspector visibility and filters. |
 | `GatheringRuntime, RandomStream, SpawnSequence` | Private seeded randomness and stable identity allocation; no later minion spawning. |
+| `PendingTowerAlerts` | Tower/attacker shot records, consumed after firing each tick; alerts friendly minions inside influence that can see the attacker. Cleared on restart. |
 | `SpatialIndex, PendingDamage` | Nearby combat lookup and simultaneous projectile impact resolution. |
 | `VisualAssets` | Private shared primitive meshes/materials; no gameplay state. |
 
 `TrailInputPlugin` in `orders.rs` handles drawings; `GatheringPlugin` handles common trail navigation and decay. Raw samples are bounded; accepted points are at least half vision radius from every accepted point of the same stroke, with no forced endpoint. Separate strokes may overlap. Carriers retain two-unit spacing.
 
 Bevy `Time<Fixed>` supplies 30 Hz steps. Simulation timers scale with speed and stop while paused, hidden or won. Area recharge grants at most one energy per minion per five-second pulse inside any friendly inclusive tower circle, even in contested ground.
+
+Movement priorities are tower defense, cargo return, closest visible enemy, visible deposit, freshest unvisited friendly trail, then exploration. Carriers may shoot enemies already in range but chase only for valid tower defense. Insufficient energy skips combat pursuit. Defense ends when the attacker leaves vision or the defended tower/attacker becomes invalid.

@@ -11,8 +11,10 @@
 | **tower beacon** | Sphere atop health cubes, supporting the donut crown. | `TowerBeacon` |
 | **stack** | Visual layout of one cube per tower health point or torus per deposit unit. | `Stack / StackVisual` |
 | **minion** | Mobile unit with local vision, combat energy and at most one rawElement cargo. | `Minion` |
-| **trail** | Shared temporary faction breadcrumb from a carrier or player stroke. Followers use visible decreasing sequences; all markers expire after 30 simulation seconds. | `Trail` |
+| **trail** | Shared temporary faction breadcrumb from a carrier or player stroke. Followers choose the highest remaining lifetime among visible unvisited friendly markers; all markers expire after 30 simulation seconds. | `Trail` |
 | **player marker** | Trail provenance for oldest-first ten-marker global budget and whole-stroke erasing. Same navigation/rendering as carrier markers. | `PlayerDrawnTrail` |
+| **tower defense alert** | A tower tells friendly minions inside its influence circle to attack its firing enemy, provided the enemy is visible to each recipient. | `TowerDefenseTarget` |
+| **combat target** | Selected enemy shared by movement and shooting; closest visible enemy normally, alerted attacker during defense. | `CombatTarget` |
 | **energy** | Combat reserve, initially and at most five. Shots cost one; any friendly inclusive tower circle grants one per five-second pulse, once even under overlap. | `EnergyStore / EnergyClock` |
 | **energy orb** | Visual sphere for one stored energy point, with no independent reserve. | `EnergyOrbVisual` |
 | **energy projectile** | Fired sphere that damages a live hostile target on impact. | `EnergyProjectile` |

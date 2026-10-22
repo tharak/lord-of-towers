@@ -77,6 +77,8 @@ struct HudRoot;
 #[derive(Component)]
 struct HudTitle;
 #[derive(Component)]
+struct HudToggleText;
+#[derive(Component)]
 struct DesktopDetail;
 #[derive(Component)]
 struct ControlBar;
@@ -149,7 +151,7 @@ fn setup(
         deposit: meshes.add(Torus::default()),
         trail: meshes.add(Cylinder::new(0.32, 0.08)),
         donut: meshes.add(Torus::default()),
-        influence_ring: meshes.add(Torus::new(0.99, 1.01)),
+        influence_ring: meshes.add(Torus::new(0.99, 1.0)),
         influence_materials: (0..5)
             .map(|i| {
                 materials.add(StandardMaterial {
@@ -345,7 +347,7 @@ fn setup(
                 position_type: PositionType::Absolute,
                 top: px(8),
                 right: px(8),
-                width: px(44),
+                width: px(96),
                 height: px(44),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -356,11 +358,12 @@ fn setup(
         ))
         .with_children(|button| {
             button.spawn((
-                Name::new("HUD visibility icon"),
+                Name::new("HUD visibility label"),
                 EntityKind::Ui,
-                Text::new("+"),
+                HudToggleText,
+                Text::new("Hide HUD"),
                 TextFont {
-                    font_size: FontSize::Px(28.0),
+                    font_size: FontSize::Px(13.0),
                     ..default()
                 },
             ));
@@ -828,7 +831,7 @@ fn responsive_layout(
             node.left = px(if mobile { 8 } else { 20 });
             node.padding = UiRect::all(px(if mobile { 8 } else { 14 }));
             node.max_width = if mobile {
-                px((window.width() - 76.0).max(1.0))
+                px((window.width() - 128.0).max(1.0))
             } else {
                 Val::Auto
             };
@@ -1186,12 +1189,16 @@ fn sync_control_state(
     hud: Res<HudVisibility>,
     mut roots: Query<&mut Node, (With<HudRoot>, Without<PauseIcon>)>,
     mut icons: Query<(&PauseIcon, &mut Node), Without<HudRoot>>,
+    mut hud_labels: Query<&mut Text, With<HudToggleText>>,
     mut buttons: Query<(
         &Control,
         &mut Name,
         Option<&mut bevy::a11y::AccessibilityNode>,
     )>,
 ) {
+    for mut text in &mut hud_labels {
+        text.0 = String::from(if hud.visible { "Hide HUD" } else { "Show HUD" });
+    }
     for mut node in &mut roots {
         node.display = if hud.visible {
             Display::Flex

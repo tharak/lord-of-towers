@@ -184,7 +184,7 @@ pub fn simulation_delta(time: &Time<Fixed>, state: &MatchState) -> f32 {
     time.delta_secs() * state.speed
 }
 
-/// Stable across match restart; also resolves deterministic graph and collection ties.
+/// Stable across match restart; also resolves deterministic combat and collection ties.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SimulationId(pub u64);
 

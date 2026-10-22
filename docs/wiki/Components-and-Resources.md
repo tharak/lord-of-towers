@@ -2,73 +2,56 @@
 
 ## Gameplay components
 
-| Name | Meaning |
+| Contract | Responsibility |
 |---|---|
-| `Name, EntityKind, MatchEntity` | Application identity, category and restart lifetime. |
-| `SimulationId` | Stable match-local tie ordering, distinct from Bevy entity IDs. |
-| `Faction, Allegiance` | Faction record and owner reference. |
-| `Tower, Minion, ElementDeposit` | Gameplay roles. Five towers, fifteen initial minions, and later minions from five-unit recipes. |
-| `PlayerControlled` | Orthanc alone accepts new player drawings; control never transfers after its loss. |
-| `OriginTower` | Initial creator reference, validated before use; origin death does not destroy a minion. |
-| `Position, Health, Movement` | X/Z ground position, health, steering speed and target. |
-| `Attack, ShootingPause` | Shot damage/range/cooldown and one-second movement pause after firing. Shots cost one energy. |
-| `CombatTarget` | Enemy selected for shared movement/firing decisions each tick. |
-| `TowerDefenseTarget` | Defended tower and firing attacker; valid only while the attacker is visible and both references remain valid. |
-| `EnergyProjectile` | Live hostile target, damage, speed and remaining flight lifetime; damage on impact. |
-| `ElementInventory` | Ordered typed units (VecDeque): homogeneous deposits, cargo 0–1, or FIFO tower stock. No visual child holds it. |
-| `ElementStats` | Fire/water/earth/air/void numeric points. Start at two; newborn recipes add matching points. Fire damage, water speed, earth max health, air vision; base multiplier = 1 + 0.10 × matching stat × (1 + 0.10 × void). |
-| `Vision` | Inclusive local detection circle, base 15, initially 18.6 from air/void bonuses. |
-| `GatheringState` | Exploring, Following { trip, sequence }, or Returning { tower }. |
-| `Trail` | Shared carrier/player trip, path sequence and remaining lifetime, default 30 seconds. Highest remaining lifetime wins navigation selection. |
-| `TrailEmitter` | Carrier trip, next sequence and last emission position; every two traveled units refresh the nearest friendly marker within two units or create one. |
-| `PlayerDrawnTrail` | Serial provenance for the ten-marker global budget and whole-stroke erase; no separate navigation behavior. |
-| `VisitedTrailMarkers` | Private per-minion reached/bypassed marker identities. Choosing a trail marks every other visible friendly marker visited; the chosen marker is recorded on arrival. Pruned when markers disappear. |
-| `EnergyStore` | Combat energy initially five, capacity five; friendly tower circles recharge one per pulse. |
-| `InfluenceEmitter` | Finite radial territory contribution. Tower radius stays fixed at default 15. |
+| `Faction`, `Allegiance`, `OriginTower` | Faction record, current owner and birth-tower reference. Survivors keep allegiance after origin loss. |
+| `Tower`, `PlayerControlled`, `Minion` | Structure, player faction anchor and mobile unit. |
+| `Name`, `EntityKind`, `MatchEntity`, `SimulationId` | Human name, entity catalog category, restart scope and deterministic simulation identity. |
+| `Position`, `Movement` | Ground-plane coordinates, speed and navigation target. |
+| `Health` | Current/max health; equipment preserves health ratio. Towers destroyed at zero. |
+| `Attack`, `ShootingPause` | Damage/range/cooldown and one-second movement pause after a free shot. |
+| `Projectile` | Live hostile target, damage, speed and remaining lifetime; impact damage. |
+| `CombatTarget`, `TowerDefenseTarget` | Shared firing/pursuit target and persistent alerted tower/attacker pair. |
+| `ElementInventory` | FIFO physical units, independent for deposits, minion cargo, tower stock and reservations. |
+| `EquippedElements` | Three optional physical element slots; duplicates allowed. |
+| `ElementStats` | Permanent fire/water/earth/air/void birth points. Start at two plus consumed recipe counts. |
+| `EquipmentOrder` | Recipient, source tower, recorded source position and Equip/ReturnEquipment/DeliverCargo action. Own inventory holds reservation. |
+| `ElementDeposit` | Homogeneous neutral finite resource pile; depleted piles despawn. |
+| `Vision` | Local detection radius, derived from air/void equipment. |
+| `GatheringState`, `TrailEmitter` | Explore/follow/return navigation and active carrier breadcrumb progress. |
+| `Trail`, private `VisitedTrailMarkers` | Thirty-second breadcrumb and per-minion visited identities. Selection marks all other visible friendly markers visited; arrival marks selected marker. |
+| `InfluenceEmitter` | Fixed radius/strength for territory and tower alert recipients. |
 
-## Presentation components
+Fire modifies damage, water speed, earth maximum health, air vision. Attribute multiplier is `1 + .10 × matching_stat × equipped_copies × (1 + .10 × void_stat × equipped_void_copies)`. No matching equipped copies gives base values (10/4/30/15). Void alone grants no bonus. Birth gear is empty.
 
-| Name | Meaning |
+## Visual and UI components
+
+| Contract | Responsibility |
 |---|---|
-| `Stack, StackVisual` | Health cubes or deposit torus counts/layout. |
-| `TowerBeacon` | Sphere child atop tower health stack. |
-| `TowerInfluenceVisual` | Private tower child marking exact faction-colored radius outline; matching EntityKind. |
-| `DonutVisual` | One torus crown child per actual element unit. |
-| `EnergyOrbVisual` | One sphere child per stored minion energy point. |
-| `SpectatorCamera` | Private camera control role. |
-| `StatusText, FactionText, Control` | Private HUD labels and clickable actions. |
-| `HudRoot, HudTitle, DesktopDetail, ControlBar` | Private responsive HUD roles. |
-| `PauseIcon(bool)` | Private rectangular pause/play UI icon pieces. |
-| `HudToggleText` | Private label on standalone Hide HUD / Show HUD control. |
-| `InspectorRoot, InspectorText, InspectorAction` | Inspector panel, live details and controls. |
+| `Stack`, `StackVisual` | Generic count-derived primitive stacks; health cubes and deposit torus units. |
+| `DonutVisual` | Typed cargo/stock crown unit; no inventory authority. |
+| `EquippedElementVisual` | Typed sphere for occupied gear slot, up to three; no inventory authority. |
+| `TowerBeacon`, `TowerInfluenceVisual`, `ProductionIndicator` | Beacon sphere, radius outline and five-available-unit player production marker. |
+| `HudRoot`, `HudTitle`, `DesktopDetail`, `ControlBar`, `PauseIcon`, `HudToggleText` | Responsive hideable HUD, five bottom controls, shape-based pause/play symbols and persistent toggle. |
+| `ContextPanel`, contextual action buttons/text | Transient selected minion equipment or tower recipe controls. Tracks world entity, fits viewport, removed on deselection/death/restart. Closing does not cancel orders. |
 
-Visual components hold no inventory or energy and use Bevy primitive meshes. Child visuals follow parent lifetime; persistent UI survives restart.
+All visuals use Bevy primitive meshes and derive from authoritative gameplay state. Child visuals disappear with parents; infrastructure persists across restart.
 
-## Resources
+## Resources and commands
 
-| Name | Meaning |
+| Contract | Responsibility |
 |---|---|
-| `SimulationConfig` | World, seed, combat, gathering, trail and energy tuning; tower_influence_radius=15, drawn_trail_capacity=10, energy_recharge_ticks=5. |
-| `DrawTrailRequests` | Incremental DrawTrailRequest { trip, sequence_start, points } batches queued on press and during dragging, retaining one trip and sequence order per stroke. |
-| `EraseTrailRequests` | World locations requesting whole player-stroke erasure within two units of marker/segment. |
-| `TrailIds` | Shared next_trip for both producers and next_player_marker serial; reset on restart. |
-| `DrawingTrail` | Private bounded live stroke samples/spacing memory, touch suppression, trip/sequence and tool state. Reset on restart. |
-| `TrailTool, CameraGesture` | Draw/Erase selection and queued two-finger pan/pinch. |
-| `HudVisibility` | HUD choice retained across restart and orientation changes. |
-| `MatchState, FactionEntities` | Pause/speed/hidden tab/winner/restart/elapsed state and faction IDs. |
-| `ElementEconomy` | Per-element initial and consumed arrays: deposits + carried + stock + consumed = initial. |
-| `EnergyClock` | Simulation-time recharge accumulator and completed pulse count. |
-| `InfluenceField` | Bounded territory samples and percentages; not recharge authority. |
-| `InspectorState, InspectorFilter` | Inspector visibility and filters. |
-| `GatheringRuntime, RandomStream, SpawnSequence` | Private seeded randomness and stable identity allocation; stable IDs also cover element-funded births. |
-| `PendingTowerAlerts` | Tower/attacker shot records, consumed after firing each tick; alerts friendly minions inside influence that can see the attacker. Cleared on restart. |
-| `SpatialIndex, PendingDamage` | Nearby combat lookup and simultaneous projectile impact resolution. |
-| `VisualAssets` | Private shared primitive meshes/materials; no gameplay state. |
+| `SimulationConfig` | World/combat/gathering tuning; delivery radius 3, tower radius 15, carrier spacing 2, trail lifetime 30. |
+| `MatchState`, `FactionEntities` | Pause/speed/winner/restart/browser state and faction entity references. |
+| `PlayerCommands` | Queued Equip, ReturnEquipment, DeliverCargo, CancelOrder and exact-five CreateMinion requests. Simulation validates ownership/live state/stock. |
+| `PlayerSelection` | Selected entity, equipment slot and selected five-unit recipe counts. |
+| `ElementEconomy` | Initial and consumed counts per type; deposits + cargo + stock + equipped + reserved + consumed = initial. |
+| `TrailIds` | Carrier-trip identity sequence. |
+| `PendingTowerAlerts` | Shot-triggered tower defense alerts drained after firing. |
+| `CameraGesture`, private pointer state | Two-finger pan/pinch and synthetic mouse suppression. |
+| `HudVisibility`, inspector state | Persistent HUD visibility and live inspector controls. |
+| `InfluenceField` | Bounded 101×101 territory sampling, 10 Hz simulation updates; no recharge. |
 
-`TrailInputPlugin` in `orders.rs` handles drawings; `GatheringPlugin` handles common trail navigation and decay. Raw samples are bounded; accepted points are at least half vision radius from every accepted point of the same stroke, with no forced endpoint. Separate strokes may overlap. Carriers retain two-unit spacing.
+Fixed steps run at 30 Hz, scale with speed and stop when paused/hidden/won. Invalid-order reservation cleanup also runs outside simulation gating. Restart clears match-scoped entities, commands and selection. Equipment transfers happen before NPC production. Player production is explicit; NPCs fill nearby empty slots before consuming five FIFO stock units. Destruction drops cargo/equipment and reservations at recorded source position; cancellation refunds living source stock.
 
-Bevy `Time<Fixed>` supplies 30 Hz steps. Simulation timers scale with speed and stop while paused, hidden or won. Area recharge grants at most one energy per minion per five-second pulse inside any friendly inclusive tower circle, even in contested ground.
-
-Movement priorities are tower defense, cargo return, closest visible enemy, visible deposit, freshest unvisited friendly trail, then exploration. Carriers may shoot enemies already in range but chase only for valid tower defense. Insufficient energy skips combat pursuit. Defense ends when the attacker leaves vision or the defended tower/attacker becomes invalid.
-
-`Element` is the ordered Fire/red, Water/blue, Earth/yellow, Air/green, Void/black enum. `ELEMENTS_PER_MINION` is five. Production runs after delivery and before recharge, consuming FIFO units and spawning a fully healthy minion with default stats plus recipe counts. Existing minions are unchanged.
+`PlayerInteractionPlugin` replaces all drawing/erasing. Carrier-only trails retain local freshness navigation. Combat prioritizes visible tower defense, then homeward orders/cargo, then visible enemy pursuit, deposits, trails and exploration. Returning units shoot in-range enemies without chasing. No energy component, clock, cost or recharge remains.

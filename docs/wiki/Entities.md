@@ -1,23 +1,39 @@
-# Entities
+# Entity catalog
 
-Every application entity has `Name` and `EntityKind`; match entities carry `MatchEntity` and are replaced on restart. Presentation children follow parent lifetimes. The inspector queries the live world directly.
+Application entities have `Name` and `EntityKind`. Simulation entities have `MatchEntity` and are replaced on restart. Visual children inherit parent lifetime. The F3 inspector queries live ECS; no duplicate registry or unbounded spawn log is kept.
 
 | EntityKind | Components and relationships | Creation and lifetime |
 |---|---|---|
-| `Faction` | `Faction { index }` | Five records at setup; remain after faction tower loss; replaced on restart. |
-| `Tower` | `SimulationId`, `Tower { slot }`, `Position`, `Allegiance`, `Health`, `ElementInventory`, `InfluenceEmitter`; Orthanc alone has `PlayerControlled` | Five at setup, each with three initial minions. Consumes the oldest five typed inventory units to spawn another minion. Destroyed at zero health, dropping unspent stock. Fixed radius 15 by default. |
-| `Minion` | `SimulationId`, `Minion`, `OriginTower`, `Position`, `Allegiance`, `Health`, `Movement`, `Attack`, `EnergyStore`, `ShootingPause`, `ElementInventory`, `ElementStats`, `Vision`, `GatheringState`, optional `CombatTarget`, `TowerDefenseTarget`, `TrailEmitter` and private `VisitedTrailMarkers` | Fifteen at setup plus element-funded newborns. All elemental stats start at two; newborn recipes add one point per matching unit. Death drops cargo and despawns; consumed birth elements are not refunded. Origin tower death does not change allegiance or destroy survivors; origin references are validated. Choosing a trail marks other visible friendly markers visited for that minion; the chosen marker is visited on arrival. Combat targets are reselected each tick; defense targets end when the attacker leaves vision or either referenced entity becomes invalid. |
-| `ElementDeposit` | `ElementDeposit`, `Position`, `ElementInventory`, `SimulationId`; presentation `Stack` | Thirty seeded homogeneous 5–10-unit deposits, six per element, plus typed death drops. Collection reduces quantity; empty deposits despawn. Never recharge. |
-| `Trail` | `Trail { trip, sequence, remaining }`, `Position`, `Allegiance`; optional `PlayerDrawnTrail { serial }` | Shared carrier/player markers, lasting 30 simulation seconds. At pickup and every two traveled units, carriers refresh a friendly marker within two units or emit one if none is nearby. Player markers appear on press and while dragging, at least half the configured base vision radius apart within one shared stroke; ten live player markers globally, replacing oldest serials. Erasure within two units of a marker/segment removes the whole player trip, never carriers. Survive origin death/delivery; restart removes all. |
-| `StackVisual` | Private stack-child marker, `ChildOf`, primitive mesh/material/transform | One cube per tower health point or torus per deposit unit. Reconciled with parent count; removed with parent. |
-| `TowerBeacon` | Presentation marker, `ChildOf`, sphere mesh/material/transform | One atop each living tower health stack; crown above it. Removed with parent. |
-| `TowerInfluenceVisual` | Private `TowerInfluenceVisual`, `ChildOf`, primitive mesh/material/transform | One faction-colored circular outline per tower at its exact influence radius. Fixed default radius 15; removed with parent. No gameplay authority. |
-| `DonutVisual` | `DonutVisual`, `ChildOf`, shared torus mesh/material/transform | One crown child per actual tower stock or minion cargo unit, in eight-piece tiers. Reconciled to FIFO inventory with element-colored materials; removed with parent. Stores no inventory. |
-| `EnergyOrbVisual` | Presentation marker, `ChildOf`, shared sphere mesh/material/transform | One orbiting sphere per stored minion energy. Reconciled to store; removed with parent. Stores no energy. |
-| `EnergyProjectile` | `EnergyProjectile { target, damage, speed, remaining }`, `Position`, `Allegiance`; sphere presentation | Created on firing after energy cost. Moves independently of shooter; removed on impact, timeout, missing/friendly target or restart. Damage occurs on impact. |
-| `Battlefield` | Ground primitive mesh/material/transform | Presentation startup; survives restart. Ground samples territory, holding no gameplay ownership. |
-| `Camera` | Camera/projection/transform, private `SpectatorCamera` | Presentation startup; survives restart; responds to keyboard and touch pan/zoom. |
-| `Light` | Lighting/transform | Presentation startup; survives restart. |
-| `Ui` | Bevy `Node`, text/button/interaction and private role components | HUD, toggle, controls and inspector created at startup; survive restart. Details below. |
+| `Faction` | `Faction { index }` | Five setup records; survive tower loss, replaced on restart. |
+| `Tower` | `SimulationId`, `Tower`, `Position`, `Allegiance`, `Health`, `ElementInventory`, `InfluenceEmitter`; Orthanc has `PlayerControlled` | Five setup towers, fixed influence radius 15. NPC towers auto-equip nearby empty slots before FIFO production; player selects five-unit birth recipes. Death drops stock and destroys tower. |
+| `Minion` | `SimulationId`, `OriginTower`, `Position`, `Allegiance`, `Health`, `Movement`, `Attack`, `ShootingPause`, `ElementInventory`, `ElementStats`, `EquippedElements`, `Vision`, `GatheringState`; optional `CombatTarget`, `TowerDefenseTarget`, `TrailEmitter`, private `VisitedTrailMarkers` | Fifteen at setup plus funded births. Empty equipment on birth; stats start at two plus recipe points. Death drops cargo and equipment; spent birth recipe is not refunded. Survive origin tower loss. |
+| `ElementDeposit` | `ElementDeposit`, `SimulationId`, `Position`, `ElementInventory`; presentation `Stack` | Thirty homogeneous seeded deposits (5–10 units, six per type) plus typed death/reservation drops. Never recharge; empty deposits despawn. |
+| `Trail` | `Trail { trip, sequence, remaining }`, `Position`, `Allegiance` | Carrier breadcrumbs only. Pickup and every two traveled units refresh nearest friendly marker within two units or create one. Thirty-second simulation lifetime; independent of carrier death/delivery. Followers mark other visible markers visited on selection and selected marker on arrival. |
+| `EquipmentOrder` | `EquipmentOrder { minion, tower, source_position, action }`, `ElementInventory` | At most one per minion. Owns reserved equip unit removed from stock immediately. Completion/cancellation/invalid references despawn order. Cancellation refunds surviving source; destruction drops reservation at recorded source position. Restart clears it. |
+| `StackVisual` | Stack child marker, `ChildOf`, primitive mesh/material/transform | One cube per tower health point or torus per deposit unit; reconciled to parent state, removed with parent. |
+| `TowerBeacon` | Presentation marker, `ChildOf`, sphere | One above each living tower health stack; stock crown above beacon; removed with parent. |
+| `TowerInfluenceVisual` | Presentation marker, `ChildOf`, circle mesh/material | Exact tower influence outline, radius 15 by default. No recharge/gameplay authority. Removed with parent. |
+| `ProductionIndicator` | Presentation marker, `MatchEntity`, `ChildOf`, primitive sphere | Player tower only, when at least five unreserved stock units exist. Follows tower height; disappears below threshold or with parent/restart. |
+| `DonutVisual` | `DonutVisual`, `ChildOf`, torus/material/transform | One per stock/cargo unit, eight per tier. Element-colored, reconciled to inventory; no inventory authority. Removed with parent. |
+| `EquippedElementVisual` | Presentation marker, `MatchEntity`, `ChildOf`, sphere/material/transform | At most three, one per occupied equipment slot in element color. Rebuilt when layout changes; removed with parent/restart. Stores no units. |
+| `Projectile` | `Projectile { target, damage, speed, remaining }`, `Position`, `Allegiance`; faction-colored sphere | Free shot; one-second shooter pause. Damage on impact. Despawns on impact, timeout, missing/friendly target or restart. Independent of shooter lifetime. |
+| `Battlefield` | Ground primitive mesh/material/transform | Presentation startup, survives restart; samples territory with no ownership authority. |
+| `Camera` | Projection/transform, private spectator marker | Startup, survives restart; mouse/touch/keyboard camera controls. |
+| `Light` | Lighting/transform | Startup, survives restart. |
+| `Ui` | Bevy `Node`, text/button/interaction and private roles | Persistent HUD, toggle, controls and inspector; transient contextual panel described below. |
 
-HUD and inspector survive restart. The independent Hide HUD / Show HUD toggle retains its setting through restart and rotation. The centered seven controls are pause/play, three speeds, restart, Draw and Erase. F3 opens the inspector; there is no Entities button. See [Components and Resources](Components-and-Resources) for UI roles and shared state.
+## UI lifecycle
+
+The five bottom controls are pause/play, 1×, 2×, 4× and restart. `HudRoot`, `HudTitle`, `DesktopDetail`, `ControlBar`, `PauseIcon` and `HudToggleText` are presentation roles. `HudVisibility` survives restart/rotation; its toggle remains accessible when hidden. F3 opens the inspector.
+
+`ContextPanel` is transient UI beside the selected friendly minion or tower. Its contextual button/text children are `Ui` entities. Selection/state changes rebuild the panel; deselection, unit destruction or restart removes it. It is independent of persistent HUD visibility. Closing the panel never cancels an accepted tower order. Two fingers pan/pinch; world clicks select units, never draw trails.
+
+## Shared state and rules
+
+`EquippedElements.slots` contains up to three physical units, duplicates allowed. Cargo remains independent. Permanent `ElementStats` starts at two each; a birth consumes five selected/FIFO units and adds matching points only to its newborn. Fire damage, water speed, earth max health and air vision use `base × [1 + .10 × matching_stat × equipped_copies × (1 + .10 × void_stat × equipped_void_copies)]`. Void alone grants no bonus. Empty gear gives damage 10, speed 4, health 30 and vision 15. Equipment changes preserve health percentage.
+
+`ElementEconomy` tracks initial and consumed counts per type. Deposits + cargo + tower stock + equipped + reserved + consumed equals initial. Visual entities hold no resources. `PlayerCommands` queues validated orders/recipes; `PlayerSelection` stores selected entity, slot and recipe. `TrailIds` allocates carrier trips; per-minion visited memory is pruned as markers disappear.
+
+`CombatTarget` shares movement/shooting target. `TowerDefenseTarget` references a visible attacker and living friendly tower. `PendingTowerAlerts` collects tower shots and resolves recipients inside tower influence with attacker in vision. Defense overrides return orders; otherwise carriers/ordered minions shoot only in-range enemies without pursuing.
+
+`InfluenceField` is bounded 101×101 territory sampling at 10 Hz simulation time. It is not an entity registry and grants no recharge. See [equipment contracts](https://github.com/tharak/lord-of-towers/blob/main/docs/equipment-contracts.md), [gathering contracts](https://github.com/tharak/lord-of-towers/blob/main/docs/gathering-contracts.md) and the [wiki](https://github.com/tharak/lord-of-towers/wiki).

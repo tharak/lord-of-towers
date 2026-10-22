@@ -8,25 +8,31 @@ A Rust + Bevy ECS strategy simulation built entirely from Bevy primitive meshes.
 
 ## Playing
 
-Five towers begin with three minions each and zero element stock. Every five elements delivered to a tower are consumed to create another minion. Minions gather finite resources and fight nearby rivals. Minions approach the closest visible enemy, whether minion or tower. When a tower is fired upon, it alerts friendly minions inside its influence circle to defend against the visible attacker. Towers are destroyed at zero health, dropping their stock. The last surviving tower wins.
+Five towers begin with three empty-equipped minions each. You control Orthanc's orange faction. Minions gather finite elements and fight visible enemies. Towers are destroyed at zero health and drop their stock; the last surviving tower wins.
 
-You control Orthanc's orange faction. Press the left mouse button or touch in **Draw** mode to place the first marker immediately; drag to add more markers as spacing allows. Release ends the stroke without adding a marker. Friendly empty-handed minions discover markers through their own vision and prefer the one with the highest remaining lifetime. Defense and combat take priority, then visible deposits, then trails. Carriers continue returning cargo unless defending an alerted tower, and can shoot enemies in range without chasing. Drawing assigns no minion and stores no enemy target. Orthanc's death prevents new drawing, while existing trails last until expiry or erasure.
+Click or tap a friendly minion to open its contextual panel. Select one of three equipment slots and choose an element available at the nearest friendly tower. The unit is reserved immediately; the minion travels home to exchange equipment. Duplicate elements are allowed. Separate actions deliver gathered cargo, return the selected equipped unit, or cancel a pending order. Closing the panel keeps accepted orders. Players no longer draw or erase trails.
 
-A stroke accepts markers at least half the configured base vision radius apart from every previously accepted point in that stroke: 7.5 world units by default. Separate strokes may overlap. At most ten player markers exist globally; every new marker replaces the oldest when necessary. Right-click, or tap in **Erase** mode, within two world units of a marker or connecting segment to remove its entire surviving stroke. Carrier trails cannot be erased this way.
+Click your tower to select a birth recipe using the element +/− buttons. Exactly five available units create one minion. A primitive marker above the tower indicates that at least five unreserved units are available. NPC towers equip empty slots on nearby minions before automatically consuming the oldest five remaining units to produce minions.
 
-Use two fingers to pan and pinch to zoom; lift every finger before drawing again. WASD/arrow keys pan and +/− zoom. Space pauses, 1/2/3 select 1×/2×/4× speed, R restarts the seed, and F3 opens the live ECS inspector. The centered seven-button bar provides pause/play, three speeds, restart, Draw and Erase. Pause/play uses rectangular UI shapes. A standalone top-right **Hide HUD / Show HUD** button hides or restores the HUD, retaining the choice through restart and screen rotation. F3 opens the inspector; there is no Entities button. The battlefield fills portrait and landscape viewports without page scrolling. Hidden browser tabs suspend simulation.
+Two fingers pan and pinch to zoom. WASD/arrow keys pan and +/− zoom. Space pauses, 1/2/3 select 1×/2×/4× speed, R restarts, and F3 opens the live ECS inspector. The centered bottom bar contains pause/play symbols, three speeds and restart. The top-right Hide HUD / Show HUD button retains its setting through restart and screen rotation. The web game supports portrait and landscape without page scrolling. Hidden browser tabs suspend simulation.
 
-## Resources, territory and energy
+## Elements, equipment and combat
 
-Thirty seeded deposits contain 5–10 units each: six deposits each of **fire/red, water/blue, earth/yellow, air/green, and void/black**. Each deposit is homogeneous and never recharges. A minion carries one unit to a friendly tower. Towers consume the oldest five delivered units, in any mixture, to create a minion. Death drops preserve unspent inventory types. For each element, remaining deposits + cargo + tower stock + consumed equals the initial total. Tower radius stays fixed at **15**; element-driven growth is removed.
+Thirty seeded deposits contain 5–10 units each, six deposits per element: **fire, water, earth, air and void**. Each deposit is homogeneous and never recharges. A minion carries one unit to a friendly tower. Donut crowns show tower stock and gathered cargo. Up to three orbiting spheres show equipped units in their element colors. Projectiles and unit bodies retain faction colors.
 
-Every minion starts with five elemental stats of **2**. Recipe units add one matching point to the newborn only. Fire increases damage, water speed, earth health, and air vision: **base × (1 + 0.10 × matching stat × (1 + 0.10 × void))**. Starting points count, giving initial damage 12.4, speed 4.96, health 37.2 and vision 18.6. Three fire and two water produces stats (5, 4, 2, 2, 2). Newborns start at full health; F3 shows their stats.
+Every minion has permanent elemental stats starting at **2** each. Five consumed recipe units add matching points only to that newborn. Equipment activates the corresponding bonus: fire damage, water speed, earth maximum health and air vision. Void equipment amplifies these bonuses. For each attribute:
 
-Each minion sees its own air/void-derived vision circle. Its movement priorities are tower defense, cargo return, closest visible enemy, visible deposits, freshest friendly trail, then exploration. Only friendly delivery towers are globally known. There is no shared faction vision. At pickup and every two traveled units, carriers refresh the nearest friendly marker within two units or place a new one if none is nearby; player and carrier markers use the same `Trail` component, rendering, navigation and 30-simulation-second lifetime. Followers reconsider marker freshness each tick. Selecting a marker marks all other visible friendly markers visited for that minion; the selected marker is visited on arrival. Sequence direction does not constrain following. Trail decay stops while paused and scales with speed.
+`base × [1 + 0.10 × matching_stat × equipped_copies × (1 + 0.10 × void_stat × equipped_void_copies)]`
 
-Territory samples current radial influence, with soft borders and contested or neutral ground. Each tower has a faction-colored circular outline showing its exact current radius. Inside or on a friendly tower's circle, a minion gains one energy every five simulation seconds, up to capacity five. Overlapping friendly circles recharge a minion only once per pulse; enemy influence or contested ground does not block recharge.
+Starting and newborn minions have empty slots: damage **10**, speed **4**, maximum health **30**, vision **15**. Void alone gives no bonus. Equipment changes preserve health percentage. Birth stats are separate from physical cargo and equipment.
 
-An attack spends one energy and fires a sphere; damage happens on impact. A minion pauses movement for one simulation second after firing. Shots fizzle when targets disappear or become friendly. Minions gather even at zero energy. One orbiting sphere represents each stored energy point. Donut crowns represent actual element inventory; tower cubes represent health. Neither visual children nor mesh dimensions determine gameplay rules.
+Minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Only friendly delivery tower locations are globally known; there is no shared faction vision.
+
+At pickup and every two traveled units, carriers refresh the nearest friendly trail within two units or place a new marker. Markers last 30 simulation seconds. Choosing a marker marks every other visible friendly marker visited for that minion; arrival marks the chosen marker visited. Decay stops while paused and scales with simulation speed.
+
+Shooting costs no resource. A shot pauses the minion for one simulation second and deals damage when its homing sphere reaches the target. Missing or friendly targets invalidate the projectile. Tower circles show fixed radius **15** for territory and defense alerts; there is no energy reserve or recharge.
+
+For every element, **deposits + cargo + tower stock + equipped + reserved + consumed = initial**. Death drops cargo and equipment. Cancelled reservations return to a surviving source tower; when either participant is destroyed, reserved units drop at the recorded source-tower position.
 
 | Faction | Color |
 |---|---|
@@ -38,7 +44,7 @@ An attack spends one energy and fires a sphere; damage happens on impact. A mini
 
 ## Architecture and development
 
-See [architecture](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [gathering contracts](docs/gathering-contracts.md), [energy contracts](docs/energy-contracts.md), and the [shared wiki vocabulary](https://github.com/tharak/lord-of-towers/wiki). Gameplay and UI use Bevy ECS; simulation state is independent of mesh and material handles.
+See [architecture](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [gathering contracts](docs/gathering-contracts.md), [equipment contracts](docs/equipment-contracts.md), and the [shared wiki vocabulary](https://github.com/tharak/lord-of-towers/wiki). Gameplay and UI use Bevy ECS; simulation state is independent of mesh and material handles.
 
 For native debugging, install stable Rust and Bevy's Linux windowing dependencies, then use `cargo run --locked`. Browser setup:
 

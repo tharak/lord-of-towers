@@ -33,7 +33,7 @@ Fire modifies damage, water speed, earth maximum health, air vision. Attribute m
 | `EquippedElementVisual` | Typed sphere for occupied gear slot, up to three; no inventory authority. |
 | `TowerBeacon`, `TowerInfluenceVisual`, `ProductionIndicator` | Beacon sphere, radius outline and five-available-unit player production marker. |
 | `HudRoot`, `HudTitle`, `DesktopDetail`, `ControlBar`, `PauseIcon`, `HudToggleText` | Responsive hideable HUD, five bottom controls, shape-based pause/play symbols and persistent toggle. |
-| `ContextPanel`, contextual action buttons/text | Transient selected minion equipment (three rows of five element buttons) or tower recipe controls. Equipped buttons are outlined; clicking one moves it immediately into cargo for homeward delivery. Tracks world entity, fits viewport, removed on deselection/death/restart. Closing does not cancel orders. |
+| `ContextPanel`, contextual action buttons/text | Transient selected minion equipment (three rows of five element buttons) or a single matching tower recipe row, with selected counts. The fifth selected unit automatically queues a birth and clears selection. Equipped buttons are outlined; clicking one moves it immediately into cargo for homeward delivery. Tracks world entity, fits viewport, removed on deselection/death/restart. Closing does not cancel orders. |
 
 All visuals use Bevy primitive meshes and derive from authoritative gameplay state. Child visuals disappear with parents; infrastructure persists across restart.
 

@@ -16,6 +16,10 @@ Newly gathered elements automatically fill the first empty equipment slot (dupli
 
 Click your tower for one row of five element buttons matching the minion panel. Each click selects one available unit and the button shows its selected count. The fifth selection automatically creates a minion and clears the recipe; there is no separate Create button. A primitive marker above the tower indicates that at least five unreserved units are available. NPC towers equip empty slots on nearby minions before automatically consuming the oldest five remaining units to produce minions.
 
+Drag a friendly minion with the left mouse button or one finger. After an eight-pixel drag threshold, the real minion follows the pointer on the ground, capped by its current upgraded movement speed. If the pointer stops ahead, the minion keeps catching up. Release leaves the last pointer position as its destination; within one world unit, normal behavior resumes. A tap still opens the contextual panel.
+
+During held/released drag movement, minions do not shoot, chase, defend, gather or exchange equipment. Cargo and reservations stay intact, carrier trails continue, and incoming damage still applies. A second finger cancels the held drag and starts pan/pinch. Cancelled input, focus loss or invalid releases end player control in place. Pausing freezes movement while pointer/release intent can still update.
+
 Two fingers pan and pinch to zoom. WASD/arrow keys pan and +/− zoom. Space pauses, 1/2/3 select 1×/2×/4× speed, R restarts, and F3 opens the live ECS inspector. The centered bottom bar contains pause/play symbols, three speeds and restart. The top-right Hide HUD / Show HUD button retains its setting through restart and screen rotation. The web game supports portrait and landscape without page scrolling. Hidden browser tabs suspend simulation.
 
 ## Elements, equipment and combat
@@ -28,7 +32,7 @@ Every minion has permanent elemental stats starting at **2** each. Five consumed
 
 Starting and newborn minions have empty slots: damage **10**, speed **4**, maximum health **30**, vision **15**. Void alone gives no bonus. Equipment changes preserve health percentage. Birth recipe points are retained as metadata and no longer scale equipment bonuses.
 
-Minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Only friendly delivery tower locations are globally known; there is no shared faction vision.
+Outside player dragging, minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Only friendly delivery tower locations are globally known; there is no shared faction vision.
 
 At pickup and every two traveled units, carriers refresh the nearest friendly trail within two units or place a new marker. Markers last 30 simulation seconds. Choosing a marker marks every other visible friendly marker visited for that minion; arrival marks the chosen marker visited. Decay stops while paused and scales with simulation speed.
 

@@ -171,6 +171,9 @@ fn navigate(world: &mut World) {
         world.resource::<MatchState>(),
     );
     for entity in units(world) {
+        if world.get::<DragControl>(entity).is_some() {
+            continue;
+        }
         let (Some(position), Some(owner), Some(vision), Some(state), Some(cargo)) = (
             world.get::<Position>(entity).copied(),
             world.get::<Allegiance>(entity).copied(),
@@ -423,7 +426,7 @@ fn collect(world: &mut World) {
             continue;
         };
         let mut candidates: Vec<_> = world
-            .query_filtered::<(Entity, &Position, &ElementInventory, &Vision), With<Minion>>()
+            .query_filtered::<(Entity, &Position, &ElementInventory, &Vision), (With<Minion>, Without<DragControl>)>()
             .iter(world)
             .filter_map(|(e, p, a, v)| {
                 let d = p.0.distance_squared(position.0);
@@ -484,7 +487,7 @@ fn deliver(world: &mut World) {
         .collect();
     let radius = world.resource::<SimulationConfig>().delivery_radius;
     for entity in units(world) {
-        if ordered.contains(&entity) {
+        if ordered.contains(&entity) || world.get::<DragControl>(entity).is_some() {
             continue;
         }
         let Some(GatheringState::Returning { tower: Some(tower) }) =

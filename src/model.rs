@@ -444,3 +444,30 @@ pub struct PlayerSelection {
     pub slot: usize,
     pub recipe: [u32; 5],
 }
+
+/// Animation-facing locomotion state, independent of simultaneous arm actions.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LegState {
+    #[default]
+    Idle,
+    Moving,
+    DragStart,
+    DragRelease,
+}
+/// Independent flags permit carrying and shooting at the same time.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ArmState {
+    pub carrying: bool,
+    pub shooting: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragPhase {
+    Held,
+    Released,
+}
+/// Active player movement intent; removed on arrival or input cancellation.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct DragControl {
+    pub target: Vec2,
+    pub phase: DragPhase,
+}

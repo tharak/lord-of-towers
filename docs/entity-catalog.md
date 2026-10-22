@@ -25,7 +25,7 @@ Every application-created entity must include `Name` and `EntityKind`. Add a row
 | Inspector panel | `Name`, `EntityKind::Ui`, `InspectorRoot`, `Node`, background and z-index | Inspector startup; survives restart; display toggled by `InspectorState.open`. | #3 |
 | Inspector control bar | `Name`, `EntityKind::Ui`, `Node`, parent-child relationship | Child of inspector panel, created once at startup. | #3 |
 | Inspector buttons and labels | `Name`, `EntityKind::Ui`, `Button` / `InspectorAction` / `Node` or `Text`; parent-child relationship | Created once. Buttons cycle kind/faction filters, unclassified inclusion, entity page, component page, and close. | #3 |
-| Inspector detail text | `Name`, `EntityKind::Ui`, `InspectorText`, `Text` and text styles | Created once. Refreshes at most four times per second, one entity and sixteen component type names per page. Despawns automatically disappear on refresh. | #3 |
+| Inspector detail text | `Name`, `EntityKind::Ui`, `InspectorText`, `Text` and text styles | Created once. Refreshes at most four times per second, one entity and sixteen component type names per page (five on compact screens). Despawns automatically disappear on refresh. | #3, #46 |
 
 ## Influence lifecycle
 

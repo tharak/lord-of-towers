@@ -35,6 +35,7 @@
 | `EnergyOrbVisual` | Presentation-only small sphere child. One per actual stored minion energy point. |
 | `SpectatorCamera` | Camera control target. |
 | `StatusText`, `FactionText`, `Control` | Debug HUD labels and clickable controls. |
+| `HudRoot`, `HudTitle`, `DesktopDetail`, `ControlBar` | Responsive UI roles: compact header, hidden small-screen details, and touch-sized control layout. |
 | `InspectorRoot`, `InspectorText`, `InspectorAction` | Inspector panel, details, and navigation/filter controls. |
 | Bevy mesh, material, transform, hierarchy and visibility components | Shared primitive rendering, parent-child lifetime, and display state. |
 

@@ -827,6 +827,7 @@ fn keyboard_controls(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<MatchSta
 }
 fn responsive_layout(
     windows: Query<&Window>,
+    mut previous_size: Local<Option<Vec2>>,
     mut nodes: Query<(
         &mut Node,
         Option<&HudRoot>,
@@ -839,6 +840,11 @@ fn responsive_layout(
     let Some(window) = windows.iter().next() else {
         return;
     };
+    let size = Vec2::new(window.width(), window.height());
+    if *previous_size == Some(size) {
+        return;
+    }
+    *previous_size = Some(size);
     let mobile = mobile_layout(window.width(), window.height());
     for (mut node, hud, bar, control, detail) in &mut nodes {
         if hud.is_some() {

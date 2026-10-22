@@ -283,6 +283,7 @@ fn navigate_orders(world: &mut World) {
         .copied()
         .collect();
     for order in orders {
+        if world.get::<DragControl>(order.minion).is_some() { continue; }
         if !live(world, order.tower) {
             continue;
         }
@@ -304,6 +305,7 @@ fn transfer_orders(world: &mut World) {
         .map(|(e, o)| (e, *o))
         .collect();
     for (entity, order) in orders {
+        if world.get::<DragControl>(order.minion).is_some() { continue; }
         let (Some(minion), Some(tower)) = (
             world.get::<Position>(order.minion),
             world.get::<Position>(order.tower),
@@ -369,6 +371,7 @@ fn equip_npcs(world: &mut World) {
         let position = world.get::<Position>(tower).unwrap().0;
         for &(_, minion) in &minions {
             if !live(world, minion)
+                || world.get::<DragControl>(minion).is_some()
                 || world.get::<Allegiance>(minion).copied() != owner
                 || world
                     .get::<Position>(minion)

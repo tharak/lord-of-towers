@@ -2,16 +2,14 @@
 use crate::model::{EnergyClock, SimSet};
 use bevy::prelude::*;
 
-mod network;
+mod recharge;
 
 pub struct EnergyPlugin;
 impl Plugin for EnergyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EnergyClock>().add_systems(
             FixedUpdate,
-            (network::reconcile_links, network::transfer_energy)
-                .chain()
-                .in_set(SimSet::Energy),
+            recharge::recharge_energy.in_set(SimSet::Energy),
         );
     }
 }

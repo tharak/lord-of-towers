@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use lord_of_towers::{
-    energy::EnergyPlugin, gathering::GatheringPlugin, influence::InfluencePlugin,
-    inspector::InspectorPlugin, orders::TrailInputPlugin, presentation::PresentationPlugin,
+    equipment::EquipmentPlugin, gathering::GatheringPlugin, influence::InfluencePlugin,
+    inspector::InspectorPlugin, orders::PlayerInteractionPlugin, presentation::PresentationPlugin,
     simulation::SimulationPlugin,
 };
 
@@ -32,9 +32,9 @@ fn main() {
         }))
         .add_plugins((
             SimulationPlugin,
-            EnergyPlugin,
+            EquipmentPlugin,
             GatheringPlugin,
-            TrailInputPlugin,
+            PlayerInteractionPlugin,
             InfluencePlugin,
             InspectorPlugin,
             PresentationPlugin,

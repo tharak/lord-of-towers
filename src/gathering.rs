@@ -85,8 +85,6 @@ pub fn spawn_deposits(commands: &mut Commands, config: &SimulationConfig) {
     }
     commands.insert_resource(runtime);
     commands.insert_resource(TrailIds::default());
-    commands.insert_resource(DrawTrailRequests::default());
-    commands.insert_resource(EraseTrailRequests::default());
     commands.insert_resource(ElementEconomy {
         initial: total,
         consumed: [0; 5],

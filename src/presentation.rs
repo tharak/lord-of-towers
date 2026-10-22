@@ -7,9 +7,14 @@ impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.055)))
             .init_resource::<TrailTool>()
+            .init_resource::<HudVisibility>()
             .init_resource::<CameraGesture>()
             .add_systems(Startup, setup)
             .add_systems(PreUpdate, browser_visibility)
+            .add_systems(
+                PostUpdate,
+                browser_control_positions.after(bevy::ui::UiSystems::Layout),
+            )
             .add_systems(
                 Update,
                 (
@@ -31,8 +36,8 @@ impl Plugin for PresentationPlugin {
                     sync_visuals,
                     attach_resource_visuals,
                     sync_gathering_visuals,
-                    sync_attack_trail_visuals,
-                    sync_link_visuals,
+                    sync_tower_influence_visuals,
+                    sync_control_state,
                     ground_colors,
                     update_hud,
                     camera_controls,
@@ -50,7 +55,8 @@ struct VisualAssets {
     deposit: Handle<Mesh>,
     trail: Handle<Mesh>,
     donut: Handle<Mesh>,
-    link: Handle<Mesh>,
+    influence_ring: Handle<Mesh>,
+    influence_materials: Vec<Handle<StandardMaterial>>,
     energy: Handle<Mesh>,
     raw: Handle<StandardMaterial>,
     trail_materials: Vec<Vec<Handle<StandardMaterial>>>,
@@ -71,6 +77,8 @@ struct HudRoot;
 #[derive(Component)]
 struct HudTitle;
 #[derive(Component)]
+struct HudToggleText;
+#[derive(Component)]
 struct DesktopDetail;
 #[derive(Component)]
 struct ControlBar;
@@ -84,7 +92,7 @@ enum Control {
     Pause,
     Speed(f32),
     Restart,
-    Inspector,
+    Hud,
     Tool(TrailTool),
 }
 
@@ -143,7 +151,17 @@ fn setup(
         deposit: meshes.add(Torus::default()),
         trail: meshes.add(Cylinder::new(0.32, 0.08)),
         donut: meshes.add(Torus::default()),
-        link: meshes.add(Cuboid::default()),
+        influence_ring: meshes.add(Torus::new(0.99, 1.0)),
+        influence_materials: (0..5)
+            .map(|i| {
+                materials.add(StandardMaterial {
+                    base_color: faction_color(i).with_alpha(0.3),
+                    alpha_mode: AlphaMode::Blend,
+                    unlit: true,
+                    ..default()
+                })
+            })
+            .collect(),
         energy: meshes.add(Sphere::new(0.2)),
         raw: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 1.0, 0.8),
@@ -233,7 +251,7 @@ fn setup(
                 DesktopDetail,
                 EntityKind::Ui,
                 Text::new(
-                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nDrag/touch: draw attack trail   Right click near trail: erase",
+                    "Pan: WASD / arrows   Zoom: + / -\nSpace: pause   1/2/3: speed   R: restart\nDrag/touch: draw trail   Right click near trail: erase",
                 ),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -267,7 +285,9 @@ fn setup(
             Node {
                 position_type: PositionType::Absolute,
                 bottom: px(20),
-                left: px(20),
+                left: px(0),
+                right: px(0),
+                justify_content: JustifyContent::Center,
                 flex_wrap: FlexWrap::Wrap,
                 column_gap: px(8),
                 row_gap: px(8),
@@ -276,14 +296,13 @@ fn setup(
         ))
         .with_children(|parent| {
             for (label, control) in [
-                ("Pause / Play", Control::Pause),
+                ("Pause", Control::Pause),
                 ("Draw", Control::Tool(TrailTool::Draw)),
                 ("Erase", Control::Tool(TrailTool::Erase)),
                 ("1x", Control::Speed(1.0)),
                 ("2x", Control::Speed(2.0)),
                 ("4x", Control::Speed(4.0)),
                 ("Restart", Control::Restart),
-                ("Entities", Control::Inspector),
             ] {
                 parent
                     .spawn((
@@ -292,6 +311,7 @@ fn setup(
                         Button,
                         control,
                         Node {
+                            min_width: px(44),
                             height: px(44),
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::Center,
@@ -301,6 +321,10 @@ fn setup(
                         BackgroundColor(Color::srgb(0.13, 0.17, 0.23)),
                     ))
                     .with_children(|button| {
+                        if matches!(control, Control::Pause) {
+                            spawn_pause_icon(button);
+                            return;
+                        }
                         button.spawn((
                             Name::new(format!("{label} label")),
                             EntityKind::Ui,
@@ -312,6 +336,37 @@ fn setup(
                         ));
                     });
             }
+        });
+    commands
+        .spawn((
+            Name::new("Hide HUD"),
+            EntityKind::Ui,
+            Button,
+            Control::Hud,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(8),
+                right: px(8),
+                width: px(96),
+                height: px(44),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            GlobalZIndex(10),
+            BackgroundColor(Color::srgb(0.13, 0.17, 0.23)),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Name::new("HUD visibility label"),
+                EntityKind::Ui,
+                HudToggleText,
+                Text::new("Hide HUD"),
+                TextFont {
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+            ));
         });
 }
 fn attach_visuals(
@@ -642,8 +697,6 @@ fn attach_resource_visuals(
     assets: Res<VisualAssets>,
     deposits: Query<Entity, (With<RawElementDeposit>, Without<Transform>)>,
     trails: Query<(Entity, &Allegiance), (With<Trail>, Without<Mesh3d>)>,
-    attack_trails: Query<(Entity, &Allegiance), (With<AttackTrail>, Without<Mesh3d>)>,
-    links: Query<(Entity, &Allegiance), (With<Link>, Without<Mesh3d>)>,
     factions: Query<&Faction>,
 ) {
     for entity in &deposits {
@@ -657,25 +710,6 @@ fn attach_resource_visuals(
                 Mesh3d(assets.trail.clone()),
                 MeshMaterial3d(assets.trail_materials[faction.index][TRAIL_BUCKETS - 1].clone()),
                 Transform::default(),
-            ));
-        }
-    }
-    for (entity, allegiance) in &attack_trails {
-        if let Ok(faction) = factions.get(allegiance.0) {
-            commands.entity(entity).insert((
-                Mesh3d(assets.trail.clone()),
-                MeshMaterial3d(assets.trail_materials[faction.index][TRAIL_BUCKETS - 1].clone()),
-                Transform::default(),
-            ));
-        }
-    }
-    for (entity, allegiance) in &links {
-        if let Ok(faction) = factions.get(allegiance.0) {
-            commands.entity(entity).insert((
-                Mesh3d(assets.link.clone()),
-                MeshMaterial3d(assets.materials[faction.index].clone()),
-                Transform::default(),
-                Visibility::Inherited,
             ));
         }
     }
@@ -712,61 +746,6 @@ fn sync_gathering_visuals(
             material.0 = assets.trail_materials[faction.index]
                 [trail_bucket(trail.remaining, config.trail_lifetime)]
             .clone();
-        }
-    }
-}
-fn sync_attack_trail_visuals(mut trails: Query<(&Position, &mut Transform), With<AttackTrail>>) {
-    for (position, mut transform) in &mut trails {
-        transform.translation = Vec3::new(position.0.x, 0.13, position.0.y);
-        transform.scale = Vec3::splat(1.25);
-    }
-}
-// Stretch a unit cuboid along local X. Gameplay endpoints remain independent of mesh size.
-fn link_transform(source: Vec2, target: Vec2) -> Option<Transform> {
-    let delta = Vec3::new(target.x - source.x, 0.0, target.y - source.y);
-    let length = delta.length();
-    if !length.is_finite() || length < 0.001 {
-        return None;
-    }
-    Some(Transform {
-        translation: Vec3::new(
-            (source.x + target.x) * 0.5,
-            0.12,
-            (source.y + target.y) * 0.5,
-        ),
-        rotation: Quat::from_rotation_arc(Vec3::X, delta / length),
-        scale: Vec3::new(length, 0.055, 0.055),
-    })
-}
-fn sync_link_visuals(
-    assets: Res<VisualAssets>,
-    positions: Query<&Position>,
-    factions: Query<&Faction>,
-    mut links: Query<(
-        &Link,
-        &Allegiance,
-        &mut Transform,
-        &mut Visibility,
-        &mut MeshMaterial3d<StandardMaterial>,
-    )>,
-) {
-    for (link, allegiance, mut transform, mut visibility, mut material) in &mut links {
-        let endpoints = positions
-            .get(link.source)
-            .ok()
-            .zip(positions.get(link.target).ok());
-        let pose = endpoints.and_then(|(source, target)| link_transform(source.0, target.0));
-        let faction = factions.get(allegiance.0).ok();
-        if let (Some(pose), Some(faction)) = (pose, faction) {
-            *transform = pose;
-            *visibility = Visibility::Inherited;
-            let handle = &assets.materials[faction.index];
-            if material.0 != *handle {
-                material.0 = handle.clone();
-            }
-        } else {
-            // Endpoints can disappear during combat/restart before graph reconciliation.
-            *visibility = Visibility::Hidden;
         }
     }
 }
@@ -852,7 +831,7 @@ fn responsive_layout(
             node.left = px(if mobile { 8 } else { 20 });
             node.padding = UiRect::all(px(if mobile { 8 } else { 14 }));
             node.max_width = if mobile {
-                px(window.width() - 16.0)
+                px((window.width() - 128.0).max(1.0))
             } else {
                 Val::Auto
             };
@@ -861,15 +840,16 @@ fn responsive_layout(
             node.display = if mobile { Display::None } else { Display::Flex };
         }
         if bar.is_some() {
-            node.left = px(if mobile { 8 } else { 20 });
-            node.right = if mobile { px(8) } else { Val::Auto };
+            node.left = px(8);
+            node.right = px(8);
+            node.justify_content = JustifyContent::Center;
             node.bottom = px(if mobile { 12 } else { 20 });
             node.column_gap = px(if mobile { 6 } else { 8 });
             node.row_gap = px(if mobile { 6 } else { 8 });
         }
-        if control.is_some() {
+        if control.is_some_and(|control| !matches!(control, Control::Hud)) {
             node.width = if mobile {
-                px(((window.width() - 34.0) / 4.0).max(1.0))
+                px(((window.width() - 34.0) / 4.0).max(44.0))
             } else {
                 Val::Auto
             };
@@ -884,7 +864,7 @@ fn responsive_layout(
 fn button_controls(
     mut buttons: Query<(Ref<Interaction>, &Control, &mut BackgroundColor)>,
     mut state: ResMut<MatchState>,
-    mut inspector: ResMut<InspectorState>,
+    mut hud: ResMut<HudVisibility>,
     mut tool: ResMut<TrailTool>,
 ) {
     // Act only on a new press while updating selected tool colors every frame.
@@ -894,7 +874,7 @@ fn button_controls(
                 Control::Pause => state.paused = !state.paused,
                 Control::Speed(speed) => state.speed = *speed,
                 Control::Restart => state.restart_requested = true,
-                Control::Inspector => inspector.open = !inspector.open,
+                Control::Hud => hud.visible = !hud.visible,
                 Control::Tool(selected) => *tool = *selected,
             }
         }
@@ -1028,12 +1008,12 @@ fn browser_state(
     inventories: Query<(&RawElement, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>,
     trails: Query<(), With<Trail>>,
     economy: Res<RawElementEconomy>,
-    links: Query<(), With<Link>>,
+    drawn: Query<(), With<PlayerDrawnTrail>>,
     stores: Query<&EnergyStore, With<Minion>>,
     clock: Res<EnergyClock>,
     energy_orbs: Query<(), With<EnergyOrbVisual>>,
     projectiles: Query<(), With<EnergyProjectile>>,
-    order_visuals: Query<&EntityKind, Or<(With<AttackTrail>, With<StackPiece>, With<TowerBeacon>)>>,
+    order_visuals: Query<&EntityKind, Or<(With<StackPiece>, With<TowerBeacon>)>>,
 ) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -1086,10 +1066,9 @@ fn browser_state(
                     .sum::<u64>()
                     .to_string(),
             ),
-            ("data-raw-spent", economy.spent.to_string()),
             ("data-raw-initial", economy.initial.to_string()),
             ("data-trails", trails.iter().count().to_string()),
-            ("data-links", links.iter().count().to_string()),
+            ("data-drawn-trails", drawn.iter().count().to_string()),
             (
                 "data-total-minion-energy",
                 stores
@@ -1100,14 +1079,6 @@ fn browser_state(
             ),
             ("data-energy-pulses", clock.pulses.to_string()),
             ("data-energy-orbs", energy_orbs.iter().count().to_string()),
-            (
-                "data-attack-trails",
-                order_visuals
-                    .iter()
-                    .filter(|kind| **kind == EntityKind::AttackTrail)
-                    .count()
-                    .to_string(),
-            ),
             (
                 "data-stack-pieces",
                 order_visuals
@@ -1153,6 +1124,209 @@ fn browser_visibility(mut state: ResMut<MatchState>) {
             resumed
         });
     state.browser_hidden = document.hidden() || resumed;
+}
+
+#[derive(Component)]
+struct TowerInfluenceVisual;
+/// Each icon is built from UI rectangles so it does not depend on font glyph coverage.
+#[derive(Component)]
+struct PauseIcon(bool);
+
+fn spawn_pause_icon(button: &mut ChildSpawnerCommands) {
+    for paused in [false, true] {
+        button
+            .spawn((
+                Name::new(if paused { "Play icon" } else { "Pause icon" }),
+                EntityKind::Ui,
+                PauseIcon(paused),
+                Node {
+                    width: px(18),
+                    height: px(20),
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+            ))
+            .with_children(|icon| {
+                if paused {
+                    for row in 0..10 {
+                        let width = (10 - (row * 2_i32 - 9).abs()) as f32 * 1.8;
+                        icon.spawn((
+                            Name::new("Play icon strip"),
+                            EntityKind::Ui,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: px(2),
+                                top: px(row * 2),
+                                width: px(width),
+                                height: px(2),
+                                ..default()
+                            },
+                            BackgroundColor(Color::WHITE),
+                        ));
+                    }
+                } else {
+                    for left in [2, 11] {
+                        icon.spawn((
+                            Name::new("Pause icon bar"),
+                            EntityKind::Ui,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: px(left),
+                                width: px(5),
+                                height: px(20),
+                                ..default()
+                            },
+                            BackgroundColor(Color::WHITE),
+                        ));
+                    }
+                }
+            });
+    }
+}
+
+fn sync_control_state(
+    state: Res<MatchState>,
+    hud: Res<HudVisibility>,
+    mut roots: Query<&mut Node, (With<HudRoot>, Without<PauseIcon>)>,
+    mut icons: Query<(&PauseIcon, &mut Node), Without<HudRoot>>,
+    mut hud_labels: Query<&mut Text, With<HudToggleText>>,
+    mut buttons: Query<(
+        &Control,
+        &mut Name,
+        Option<&mut bevy::a11y::AccessibilityNode>,
+    )>,
+) {
+    for mut text in &mut hud_labels {
+        text.0 = String::from(if hud.visible { "Hide HUD" } else { "Show HUD" });
+    }
+    for mut node in &mut roots {
+        node.display = if hud.visible {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    for (icon, mut node) in &mut icons {
+        node.display = if icon.0 == state.paused {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    for (control, mut name, accessible) in &mut buttons {
+        match control {
+            Control::Pause => *name = Name::new(if state.paused { "Play" } else { "Pause" }),
+            Control::Hud => *name = Name::new(if hud.visible { "Hide HUD" } else { "Show HUD" }),
+            _ => {}
+        }
+        if let Some(mut accessible) = accessible {
+            accessible.set_label(name.as_str());
+        }
+    }
+}
+
+fn sync_tower_influence_visuals(world: &mut World) {
+    let towers: Vec<_> = world
+        .query_filtered::<(Entity, &Health, &InfluenceEmitter, &Allegiance), With<Tower>>()
+        .iter(world)
+        .map(|(entity, health, emitter, allegiance)| {
+            (entity, health.current, emitter.radius, allegiance.0)
+        })
+        .collect();
+    for (parent, health, radius, faction) in towers {
+        let child = world.get::<Children>(parent).and_then(|children| {
+            children
+                .iter()
+                .find(|child| world.get::<TowerInfluenceVisual>(*child).is_some())
+        });
+        if health <= 0.0 || !radius.is_finite() || radius <= 0.0 {
+            if let Some(child) = child {
+                world.despawn(child);
+            }
+            continue;
+        }
+        let Some(faction) = world.get::<Faction>(faction) else {
+            continue;
+        };
+        let assets = world.resource::<VisualAssets>();
+        let material = assets.influence_materials[faction.index].clone();
+        let mesh = assets.influence_ring.clone();
+        let transform =
+            Transform::from_xyz(0.0, 0.08, 0.0).with_scale(Vec3::new(radius, 0.1, radius));
+        if let Some(child) = child {
+            world
+                .entity_mut(child)
+                .insert((transform, MeshMaterial3d(material)));
+        } else {
+            world.spawn((
+                Name::new("Tower recharge area"),
+                EntityKind::TowerInfluenceVisual,
+                TowerInfluenceVisual,
+                ChildOf(parent),
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                transform,
+            ));
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn browser_control_positions() {}
+#[cfg(target_arch = "wasm32")]
+fn browser_control_positions(
+    controls: Query<(&Control, &ComputedNode, &UiGlobalTransform)>,
+    hud: Res<HudVisibility>,
+    state: Res<MatchState>,
+    areas: Query<(), With<TowerInfluenceVisual>>,
+    towers: Query<&InfluenceEmitter, With<Tower>>,
+) {
+    let Some(status) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("game-status"))
+    else {
+        return;
+    };
+    let mut positions = Vec::new();
+    for (control, node, transform) in &controls {
+        if node.size() == Vec2::ZERO {
+            continue;
+        }
+        let key = match control {
+            Control::Pause => "pause",
+            Control::Tool(TrailTool::Draw) => "draw",
+            Control::Tool(TrailTool::Erase) => "erase",
+            Control::Hud => "hud",
+            Control::Restart => "restart",
+            Control::Speed(speed) if *speed == 1.0 => "1x",
+            Control::Speed(speed) if *speed == 2.0 => "2x",
+            Control::Speed(speed) if *speed == 4.0 => "4x",
+            _ => continue,
+        };
+        let center = transform.translation * node.inverse_scale_factor();
+        positions.push(format!("\"{key}\":[{},{}]", center.x, center.y));
+    }
+    let _ = status.set_attribute(
+        "data-control-positions",
+        &format!("{{{}}}", positions.join(",")),
+    );
+    let _ = status.set_attribute(
+        "data-hud-visible",
+        if hud.visible { "true" } else { "false" },
+    );
+    let _ = status.set_attribute(
+        "data-pause-action",
+        if state.paused { "play" } else { "pause" },
+    );
+    let _ = status.set_attribute("data-recharge-areas", &areas.iter().count().to_string());
+    let _ = status.set_attribute(
+        "data-max-tower-radius",
+        &towers
+            .iter()
+            .map(|emitter| emitter.radius)
+            .fold(0.0_f32, f32::max)
+            .to_string(),
+    );
 }
 
 #[cfg(test)]
@@ -1205,10 +1379,63 @@ mod tests {
     }
 
     #[test]
+    fn hud_and_pause_controls_sync_without_hiding_controls_or_resetting_visibility() {
+        let mut app = App::new();
+        app.init_resource::<MatchState>()
+            .init_resource::<HudVisibility>()
+            .add_systems(Update, sync_control_state);
+        let hud = app.world_mut().spawn((HudRoot, Node::default())).id();
+        let button = app
+            .world_mut()
+            .spawn((Control::Hud, Name::new(""), Node::default()))
+            .id();
+        let pause = app.world_mut().spawn((Control::Pause, Name::new(""))).id();
+        let pause_icon = app
+            .world_mut()
+            .spawn((PauseIcon(false), Node::default()))
+            .id();
+        let play_icon = app
+            .world_mut()
+            .spawn((PauseIcon(true), Node::default()))
+            .id();
+        app.update();
+        assert_eq!(app.world().get::<Node>(hud).unwrap().display, Display::Flex);
+        assert_eq!(app.world().get::<Name>(pause).unwrap().as_str(), "Pause");
+        assert_eq!(
+            app.world().get::<Node>(play_icon).unwrap().display,
+            Display::None
+        );
+        app.world_mut().resource_mut::<HudVisibility>().visible = false;
+        app.world_mut().resource_mut::<MatchState>().paused = true;
+        app.update();
+        assert_eq!(app.world().get::<Node>(hud).unwrap().display, Display::None);
+        assert_eq!(
+            app.world().get::<Node>(button).unwrap().display,
+            Display::Flex
+        );
+        assert_eq!(
+            app.world().get::<Name>(button).unwrap().as_str(),
+            "Show HUD"
+        );
+        assert_eq!(app.world().get::<Name>(pause).unwrap().as_str(), "Play");
+        assert_eq!(
+            app.world().get::<Node>(pause_icon).unwrap().display,
+            Display::None
+        );
+        assert_eq!(
+            app.world().get::<Node>(play_icon).unwrap().display,
+            Display::Flex
+        );
+        app.world_mut().insert_resource(MatchState::default());
+        app.update();
+        assert!(!app.world().resource::<HudVisibility>().visible);
+    }
+
+    #[test]
     fn selecting_erase_persists_after_button_release() {
         let mut app = App::new();
         app.init_resource::<MatchState>()
-            .init_resource::<InspectorState>()
+            .init_resource::<HudVisibility>()
             .init_resource::<TrailTool>()
             .add_systems(Update, button_controls);
         let erase = app
@@ -1252,19 +1479,6 @@ mod tests {
     }
 
     #[test]
-    fn link_mesh_spans_endpoints_and_rejects_degenerate_segments() {
-        let source = Vec2::new(-3.0, 7.0);
-        let target = Vec2::new(4.0, -2.0);
-        let transform = link_transform(source, target).unwrap();
-        let start = transform.transform_point(Vec3::NEG_X * 0.5);
-        let end = transform.transform_point(Vec3::X * 0.5);
-        assert!(start.distance(Vec3::new(source.x, 0.12, source.y)) < 0.0001);
-        assert!(end.distance(Vec3::new(target.x, 0.12, target.y)) < 0.0001);
-        assert!(link_transform(source, source).is_none());
-        assert!(link_transform(Vec2::splat(f32::NAN), target).is_none());
-    }
-
-    #[test]
     fn trail_fade_uses_bounded_buckets() {
         assert_eq!(trail_bucket(30.0, 30.0), TRAIL_BUCKETS - 1);
         assert_eq!(trail_bucket(15.0, 30.0), 3);
@@ -1294,7 +1508,8 @@ mod tests {
             deposit: meshes.add(Torus::default()),
             trail: meshes.add(Cylinder::default()),
             donut: meshes.add(Torus::default()),
-            link: meshes.add(Cuboid::default()),
+            influence_ring: meshes.add(Torus::default()),
+            influence_materials: palette.clone(),
             energy: meshes.add(Sphere::new(0.2)),
             raw: raw.clone(),
             trail_materials: fades.clone(),
@@ -1313,8 +1528,7 @@ mod tests {
                 sync_visuals,
                 attach_resource_visuals,
                 sync_gathering_visuals,
-                sync_attack_trail_visuals,
-                sync_link_visuals,
+                sync_tower_influence_visuals,
             )
                 .chain(),
         );
@@ -1337,6 +1551,10 @@ mod tests {
             .world_mut()
             .spawn((
                 Tower { slot: 0 },
+                InfluenceEmitter {
+                    radius: 12.0,
+                    strength: 1.0,
+                },
                 Health {
                     current: 19.0,
                     max: 20.0,
@@ -1363,13 +1581,16 @@ mod tests {
                 Allegiance(own),
             ))
             .id();
-        let link = app
+        let drawn = app
             .world_mut()
             .spawn((
-                Link {
-                    source: tower,
-                    target: minion,
+                PlayerDrawnTrail { serial: 1 },
+                Trail {
+                    trip: 1,
+                    sequence: 0,
+                    remaining: 15.0,
                 },
+                Position(Vec2::Y),
                 Allegiance(own),
             ))
             .id();
@@ -1389,19 +1610,6 @@ mod tests {
                 Position(Vec2::new(4.0, 8.0)),
             ))
             .id();
-        let attack = app
-            .world_mut()
-            .spawn((
-                AttackTrail {
-                    tower,
-                    path_id: 0,
-                    sequence: 0,
-                    target: None,
-                },
-                Position(Vec2::new(8.0, 3.0)),
-                Allegiance(own),
-            ))
-            .id();
         app.world_mut().run_schedule(Update);
         let pieces = |world: &mut World, parent: Entity| -> Vec<Entity> {
             world
@@ -1412,29 +1620,33 @@ mod tests {
         };
         assert_eq!(pieces(app.world_mut(), tower).len(), 19);
         assert_eq!(pieces(app.world_mut(), deposit).len(), 5);
+        let area = app
+            .world()
+            .get::<Children>(tower)
+            .unwrap()
+            .iter()
+            .find(|child| app.world().get::<TowerInfluenceVisual>(*child).is_some())
+            .unwrap();
+        assert_eq!(app.world().get::<Transform>(area).unwrap().scale.x, 12.0);
+        app.world_mut()
+            .get_mut::<InfluenceEmitter>(tower)
+            .unwrap()
+            .radius = 18.0;
+        app.world_mut().run_schedule(Update);
+        assert_eq!(app.world().get::<Transform>(area).unwrap().scale.z, 18.0);
+        assert_eq!(
+            *app.world().get::<EntityKind>(area).unwrap(),
+            EntityKind::TowerInfluenceVisual
+        );
         let stack = *app.world().get::<Stack>(tower).unwrap();
         assert_eq!(stack.count, 19);
         assert!(stack.transform(16).translation.y > stack.transform(0).translation.y);
-        let marker = app.world().get::<Transform>(attack).unwrap();
-        assert_eq!(marker.translation, Vec3::new(8.0, 0.13, 3.0));
-        assert_eq!(marker.scale, Vec3::splat(1.25));
-        assert_eq!(
-            app.world().get::<Mesh3d>(attack).unwrap().0,
-            app.world().resource::<VisualAssets>().trail
-        );
-        app.world_mut().get_mut::<Position>(attack).unwrap().0 = Vec2::new(9.0, 4.0);
         app.world_mut().get_mut::<Health>(tower).unwrap().current = 1.0;
         app.world_mut().get_mut::<RawElement>(deposit).unwrap().0 = 2;
         app.world_mut().run_schedule(Update);
         assert_eq!(pieces(app.world_mut(), tower).len(), 1);
         let deposit_pieces = pieces(app.world_mut(), deposit);
         assert_eq!(deposit_pieces.len(), 2);
-        assert_eq!(
-            app.world().get::<Transform>(attack).unwrap().translation,
-            Vec3::new(9.0, 0.13, 4.0)
-        );
-        app.world_mut().despawn(attack);
-        assert!(app.world().get_entity(attack).is_err());
         assert_eq!(
             app.world()
                 .get::<Transform>(projectile)
@@ -1516,6 +1728,20 @@ mod tests {
                 .0,
             fades[0][3]
         );
+        assert_eq!(
+            app.world().get::<Mesh3d>(drawn).unwrap().0,
+            app.world().get::<Mesh3d>(trail).unwrap().0
+        );
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(drawn)
+                .unwrap()
+                .0,
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(trail)
+                .unwrap()
+                .0
+        );
         app.world_mut().get_mut::<RawElement>(minion).unwrap().0 = 1;
         app.world_mut().entity_mut(tower).insert(Allegiance(enemy));
         app.world_mut().run_schedule(Update);
@@ -1588,14 +1814,11 @@ mod tests {
                 .all(|piece| app.world().get_entity(*piece).is_err())
         );
         assert!(app.world().get_entity(beacon).is_err());
+        assert!(app.world().get_entity(area).is_err());
         assert!(
             remaining
                 .iter()
                 .all(|child| app.world().get_entity(*child).is_err())
-        );
-        assert_eq!(
-            *app.world().get::<Visibility>(link).unwrap(),
-            Visibility::Hidden
         );
     }
 }

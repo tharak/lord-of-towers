@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { controlPosition } from './controls.mjs';
 
 // Wait for rendered frames between touch packets so Bevy observes each phase.
 async function frames(page, count = 4) {
@@ -20,6 +21,10 @@ async function touch(page, session, type, points) {
 async function tap(page, session, x, y) {
   await touch(page, session, 'touchStart', [[0, x, y]]);
   await touch(page, session, 'touchEnd', []);
+}
+
+async function tapControl(page, session, status, key) {
+  await tap(page, session, ...await controlPosition(status, key));
 }
 
 async function camera(status) {
@@ -46,34 +51,43 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
   await expect(page.locator('#error')).toBeHidden();
   await expect(status).toHaveAttribute('data-mobile-layout', 'true');
   await expect(status).toHaveAttribute('data-trail-tool', 'draw');
-  await expect(status).toHaveAttribute('data-attack-trails', '0');
+  await expect(status).toHaveAttribute('data-drawn-trails', '0');
+  await expect(status).toHaveAttribute('data-recharge-areas', '5');
+  await expect(status).toHaveAttribute('data-pause-action', 'pause');
   const session = await context.newCDPSession(page);
 
-  // The bottom ECS bar has four columns and two rows, each with a 44px target.
-  await tap(page, session, 390 * 0.125, 844 - 84);
+  await tapControl(page, session, status, 'hud');
+  await expect(status).toHaveAttribute('data-hud-visible', 'false');
+  await tapControl(page, session, status, 'hud');
+  await expect(status).toHaveAttribute('data-hud-visible', 'true');
+
+  // Read actual ECS control centers after the centered mobile layout is computed.
+  await tapControl(page, session, status, 'pause');
   await expect(status).toHaveAttribute('data-paused', 'true');
-  await expect(status).toHaveAttribute('data-attack-trails', '0');
-  await tap(page, session, 390 * 0.125, 844 - 84);
+  await expect(status).toHaveAttribute('data-pause-action', 'play');
+  await expect(status).toHaveAttribute('data-drawn-trails', '0');
+  await tapControl(page, session, status, 'pause');
   await expect(status).toHaveAttribute('data-paused', 'false');
   await touch(page, session, 'touchStart', [[0, 150, 420]]);
   for (let x = 160; x <= 240; x += 10) {
     await touch(page, session, 'touchMove', [[0, x, 420]]);
   }
   await touch(page, session, 'touchEnd', []);
-  await expect.poll(async () => Number(await status.getAttribute('data-attack-trails'))).toBeGreaterThan(1);
-  const drawn = await status.getAttribute('data-attack-trails');
+  await expect.poll(async () => Number(await status.getAttribute('data-drawn-trails'))).toBeGreaterThan(1);
+  const drawn = await status.getAttribute('data-drawn-trails');
+  expect(Number(drawn)).toBeLessThanOrEqual(10);
   await page.screenshot({ path: testInfo.outputPath('mobile-drawn-path.png') });
-  await tap(page, session, 390 * 0.125, 844 - 84);
+  await tapControl(page, session, status, 'pause');
   await expect(status).toHaveAttribute('data-paused', 'true');
 
-  await tap(page, session, 390 * 0.625, 844 - 84);
+  await tapControl(page, session, status, 'erase');
   await expect(status).toHaveAttribute('data-trail-tool', 'erase');
-  await expect(status).toHaveAttribute('data-attack-trails', drawn);
+  await expect(status).toHaveAttribute('data-drawn-trails', drawn);
   await tap(page, session, 340, 230);
-  await expect(status).toHaveAttribute('data-attack-trails', drawn);
+  await expect(status).toHaveAttribute('data-drawn-trails', drawn);
   await tap(page, session, 195, 420);
-  await expect(status).toHaveAttribute('data-attack-trails', '0');
-  await tap(page, session, 390 * 0.375, 844 - 84);
+  await expect(status).toHaveAttribute('data-drawn-trails', '0');
+  await tapControl(page, session, status, 'draw');
   await expect(status).toHaveAttribute('data-trail-tool', 'draw');
 
   const beforePan = await camera(status);
@@ -85,7 +99,7 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
     const after = await camera(status);
     return Math.hypot(after.x - beforePan.x, after.z - beforePan.z);
   }).toBeGreaterThan(0.01);
-  await expect(status).toHaveAttribute('data-attack-trails', '0');
+  await expect(status).toHaveAttribute('data-drawn-trails', '0');
 
   const beforePinch = await camera(status);
   await touch(page, session, 'touchStart', [[0, 150, 360], [1, 240, 360]]);
@@ -95,16 +109,22 @@ test('touch tools, camera gestures, and mobile controls survive rotation', async
   await touch(page, session, 'touchMove', [[0, 110, 360]]);
   await touch(page, session, 'touchMove', [[0, 170, 390]]);
   await touch(page, session, 'touchEnd', []);
-  await expect(status).toHaveAttribute('data-attack-trails', '0');
+  await expect(status).toHaveAttribute('data-drawn-trails', '0');
   await page.screenshot({ path: testInfo.outputPath('mobile-camera-gestures.png') });
+
+  await tapControl(page, session, status, 'hud');
+  await expect(status).toHaveAttribute('data-hud-visible', 'false');
 
   await page.setViewportSize({ width: 844, height: 390 });
   await expect.poll(async () => page.locator('#game').evaluate(el => el.clientWidth)).toBe(844);
   await frames(page);
   await expect(status).toHaveAttribute('data-mobile-layout', 'true');
-  await tap(page, session, 844 * 0.125, 390 - 84);
+  await expect(status).toHaveAttribute('data-hud-visible', 'false');
+  await tapControl(page, session, status, 'hud');
+  await expect(status).toHaveAttribute('data-hud-visible', 'true');
+  await tapControl(page, session, status, 'pause');
   await expect(status).toHaveAttribute('data-paused', 'false');
-  await expect(status).toHaveAttribute('data-attack-trails', '0');
+  await expect(status).toHaveAttribute('data-drawn-trails', '0');
   await page.screenshot({ path: testInfo.outputPath('mobile-landscape.png') });
   await expect(page.locator('#error')).toBeHidden();
   expect(errors).toEqual([]);

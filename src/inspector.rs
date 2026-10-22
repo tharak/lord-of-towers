@@ -1,7 +1,7 @@
 //! A bounded view into the live ECS world, never an entity registry.
 use crate::model::{
-    Allegiance, EnergyStore, EntityKind, FACTION_NAMES, Faction, GatheringState, Link, RawElement,
-    SupplyConnection, Trail, Vision,
+    Allegiance, EnergyStore, EntityKind, FACTION_NAMES, Faction, GatheringState, InfluenceEmitter,
+    PlayerDrawnTrail, RawElement, Trail, Vision,
 };
 use bevy::prelude::*;
 use std::fmt::Write;
@@ -42,19 +42,18 @@ enum InspectorAction {
     Components,
     Close,
 }
-const KINDS: [EntityKind; 16] = [
+const KINDS: [EntityKind; 15] = [
     EntityKind::Faction,
     EntityKind::Tower,
     EntityKind::Minion,
     EntityKind::RawElementDeposit,
     EntityKind::Trail,
-    EntityKind::AttackTrail,
     EntityKind::DonutVisual,
     EntityKind::EnergyOrbVisual,
     EntityKind::EnergyProjectile,
     EntityKind::StackVisual,
     EntityKind::TowerBeacon,
-    EntityKind::Link,
+    EntityKind::TowerInfluenceVisual,
     EntityKind::Battlefield,
     EntityKind::Camera,
     EntityKind::Light,
@@ -258,15 +257,11 @@ fn append_energy_details(text: &mut String, entity: &EntityRef) {
             trail.trip, trail.sequence, trail.remaining
         );
     }
-    if let Some(connection) = entity.get::<SupplyConnection>() {
-        let _ = writeln!(
-            text,
-            "Supply parent: {:?} | root: {:?}",
-            connection.parent, connection.root
-        );
+    if let Some(emitter) = entity.get::<InfluenceEmitter>() {
+        let _ = writeln!(text, "Recharge radius: {:.1}", emitter.radius);
     }
-    if let Some(link) = entity.get::<Link>() {
-        let _ = writeln!(text, "Link: {:?} -> {:?}", link.source, link.target);
+    if let Some(drawn) = entity.get::<PlayerDrawnTrail>() {
+        let _ = writeln!(text, "Player drawn trail: {}", drawn.serial);
     }
 }
 

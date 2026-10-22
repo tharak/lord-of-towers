@@ -31,7 +31,7 @@ pub struct OriginTower(pub Entity);
 pub struct Tower {
     pub slot: usize,
 }
-/// The one tower whose minions accept player attack orders.
+/// The one tower whose faction accepts player-drawn trails.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerControlled;
 #[derive(Component, Debug)]
@@ -45,13 +45,12 @@ pub enum EntityKind {
     Minion,
     RawElementDeposit,
     Trail,
-    AttackTrail,
     DonutVisual,
     EnergyOrbVisual,
     EnergyProjectile,
     StackVisual,
     TowerBeacon,
-    Link,
+    TowerInfluenceVisual,
     Battlefield,
     Camera,
     Light,
@@ -63,10 +62,6 @@ pub struct Position(pub Vec2);
 pub struct Health {
     pub current: f32,
     pub max: f32,
-}
-#[derive(Component, Debug)]
-pub struct Spawner {
-    pub cap: usize,
 }
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Movement {
@@ -94,8 +89,9 @@ pub struct InfluenceEmitter {
 pub struct SimulationConfig {
     pub half_extent: f32,
     pub starting_minions: usize,
-    pub minion_raw_cost: u32,
-    pub population_cap: usize,
+    pub tower_influence_radius: f32,
+    pub tower_radius_per_raw: f32,
+    pub drawn_trail_capacity: usize,
     pub minion_speed: f32,
     pub minion_health: f32,
     pub tower_health: f32,
@@ -111,17 +107,17 @@ pub struct SimulationConfig {
     pub projectile_speed: f32,
     pub projectile_lifetime: f32,
     pub pickup_radius: f32,
-    pub link_range: f32,
     pub energy_tick_seconds: f32,
-    pub energy_transfer_ticks: u32,
+    pub energy_recharge_ticks: u32,
 }
 impl Default for SimulationConfig {
     fn default() -> Self {
         Self {
             half_extent: 50.0,
             starting_minions: 3,
-            minion_raw_cost: 5,
-            population_cap: 100,
+            tower_influence_radius: 15.0,
+            tower_radius_per_raw: 1.0,
+            drawn_trail_capacity: 10,
             minion_speed: 4.0,
             minion_health: 30.0,
             tower_health: 180.0,
@@ -137,9 +133,8 @@ impl Default for SimulationConfig {
             projectile_speed: 20.0,
             projectile_lifetime: 1.5,
             pickup_radius: 1.0,
-            link_range: 15.0,
             energy_tick_seconds: 1.0,
-            energy_transfer_ticks: 5,
+            energy_recharge_ticks: 5,
         }
     }
 }
@@ -172,12 +167,12 @@ pub enum SimSet {
     Spawn,
     Index,
     Target,
-    Orders,
+    TrailInput,
     Movement,
     Combat,
     Capture,
     Gathering,
-    PaidSpawn,
+    TowerGrowth,
     Energy,
     Influence,
     Victory,
@@ -189,7 +184,7 @@ pub fn simulation_delta(time: &Time<Fixed>, state: &MatchState) -> f32 {
     time.delta_secs() * state.speed
 }
 
-/// Stable across match restart; also resolves deterministic graph and collection ties.
+/// Stable across match restart; also resolves deterministic combat and collection ties.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SimulationId(pub u64);
 
@@ -235,33 +230,36 @@ pub struct Trail {
     pub sequence: u32,
     pub remaining: f32,
 }
-/// A persistent player signal discovered by eligible minions within vision.
-/// The optional enemy target updates its position each step.
+/// Origin metadata for the player marker budget and whole-stroke erasing.
 #[derive(Component, Clone, Copy, Debug)]
-pub struct AttackTrail {
-    pub tower: Entity,
-    pub path_id: u64,
-    pub sequence: u32,
-    pub target: Option<Entity>,
-}
-
-/// Present on a minion while it follows a player-placed attack trail.
-#[derive(Component, Clone, Copy, Debug)]
-pub struct AttackOrder {
-    pub trail: Entity,
+pub struct PlayerDrawnTrail {
+    pub serial: u64,
 }
 
 /// Completed pointer gestures, each an ordered world-space polyline, queued for simulation.
 #[derive(Resource, Default)]
-pub struct AttackOrderRequests(pub Vec<Vec<Vec2>>);
+pub struct DrawTrailRequests(pub Vec<Vec<Vec2>>);
 
-/// Monotonic identity for player-drawn attack paths.
+/// Shared identity sequence for carrier trips and player strokes.
 #[derive(Resource, Default)]
-pub struct AttackPathIds(pub u64);
+pub struct TrailIds {
+    pub next_trip: u64,
+    pub next_player_marker: u64,
+}
 
-/// Right-click locations pending cancellation of the closest player attack path.
+/// Locations pending erasure of the closest player-drawn stroke.
 #[derive(Resource, Default)]
-pub struct CancelAttackOrderRequests(pub Vec<Vec2>);
+pub struct EraseTrailRequests(pub Vec<Vec2>);
+
+#[derive(Resource, Debug)]
+pub struct HudVisibility {
+    pub visible: bool,
+}
+impl Default for HudVisibility {
+    fn default() -> Self {
+        Self { visible: true }
+    }
+}
 
 /// The battlefield tool selected by the player's touch or mouse controls.
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,26 +292,6 @@ pub struct TrailEmitter {
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct RawElementEconomy {
     pub initial: u32,
-    pub spent: u32,
-}
-
-/// Each directed edge is an independent ECS entity, from supplier to recipient.
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Link {
-    pub source: Entity,
-    pub target: Entity,
-}
-
-/// Present only on minions currently connected to a friendly tower.
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SupplyConnection {
-    pub root: Entity,
-    pub parent: Entity,
-}
-
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct ForwardingCursor {
-    pub last_recipient: Option<u64>,
 }
 
 #[derive(Resource, Debug, Default)]

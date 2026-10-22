@@ -25,12 +25,12 @@ impl Plugin for SimulationPlugin {
                     SimSet::Spawn,
                     SimSet::Index,
                     SimSet::Target,
-                    SimSet::Orders,
+                    SimSet::TrailInput,
                     SimSet::Movement,
                     SimSet::Combat,
                     SimSet::Capture,
                     SimSet::Gathering,
-                    SimSet::PaidSpawn,
+                    SimSet::TowerGrowth,
                     SimSet::Energy,
                     SimSet::Influence,
                     SimSet::Victory,
@@ -55,7 +55,7 @@ impl Plugin for SimulationPlugin {
                     .in_set(SimSet::Combat),
             )
             .add_systems(FixedUpdate, resolve_damage.in_set(SimSet::Capture))
-            .add_systems(FixedUpdate, spawn_minions.in_set(SimSet::PaidSpawn))
+            .add_systems(FixedUpdate, grow_tower_radius.in_set(SimSet::TowerGrowth))
             .add_systems(FixedUpdate, check_victory.in_set(SimSet::Victory));
     }
 }
@@ -156,7 +156,6 @@ fn create_match(
                 EntityKind::Tower,
                 MatchEntity,
                 Tower { slot: index },
-                ForwardingCursor::default(),
                 SimulationId(index as u64),
                 Allegiance(faction),
                 Position(position),
@@ -164,12 +163,9 @@ fn create_match(
                     current: config.tower_health,
                     max: config.tower_health,
                 },
-                Spawner {
-                    cap: config.population_cap,
-                },
                 RawElement(0),
                 InfluenceEmitter {
-                    radius: 15.0,
+                    radius: config.tower_influence_radius,
                     strength: 4.0,
                 },
             ))
@@ -177,7 +173,7 @@ fn create_match(
         if index == 0 {
             commands.entity(tower).insert(PlayerControlled);
         }
-        for _ in 0..config.starting_minions.min(config.population_cap) {
+        for _ in 0..config.starting_minions {
             spawn_minion(
                 commands,
                 config,
@@ -261,7 +257,6 @@ fn spawn_minion(
                 current: config.initial_energy.min(config.energy_capacity),
                 capacity: config.energy_capacity,
             },
-            ForwardingCursor::default(),
             RawElement(0),
             Vision {
                 radius: config.vision_radius,
@@ -300,53 +295,14 @@ fn spawn_minion(
     ));
 }
 
-fn spawn_minions(
-    mut commands: Commands,
+/// Raw element remains stored: each unit expands the tower's circular area.
+fn grow_tower_radius(
     config: Res<SimulationConfig>,
-    mut random: ResMut<RandomStream>,
-    mut towers: Query<(
-        Entity,
-        &Position,
-        &Allegiance,
-        &Spawner,
-        &Tower,
-        &mut RawElement,
-    )>,
-    mut sequence: ResMut<SpawnSequence>,
-    minions: Query<&OriginTower, With<Minion>>,
-    mut economy: ResMut<RawElementEconomy>,
+    mut towers: Query<(&RawElement, &mut InfluenceEmitter), With<Tower>>,
 ) {
-    let mut counts = HashMap::<Entity, usize>::new();
-    for origin in &minions {
-        *counts.entry(origin.0).or_default() += 1;
-    }
-    let mut order: Vec<_> = towers
-        .iter()
-        .map(|(entity, _, _, _, tower, _)| (tower.slot, entity))
-        .collect();
-    order.sort_by_key(|(slot, _)| *slot);
-    // A zero configured cost must never create an unbounded free-spawning loop.
-    let cost = config.minion_raw_cost.max(1);
-    for (_, entity) in order {
-        let Ok((tower, position, allegiance, spawner, _, mut stock)) = towers.get_mut(entity)
-        else {
-            continue;
-        };
-        let count = counts.entry(tower).or_default();
-        while stock.0 >= cost && *count < spawner.cap {
-            stock.0 -= cost;
-            economy.spent += cost;
-            *count += 1;
-            spawn_minion(
-                &mut commands,
-                &config,
-                &mut random,
-                &mut sequence,
-                tower,
-                position.0,
-                *allegiance,
-            );
-        }
+    for (stock, mut emitter) in &mut towers {
+        emitter.radius =
+            config.tower_influence_radius + stock.0 as f32 * config.tower_radius_per_raw;
     }
 }
 
@@ -466,12 +422,9 @@ fn collect_damage(
     state: Res<MatchState>,
     spatial: Res<SpatialIndex>,
     factions: Query<&Faction>,
-    trails: Query<&AttackTrail>,
-    health: Query<&Health>,
     mut attackers: Query<
         (
             Entity,
-            Option<&AttackOrder>,
             &Position,
             &Allegiance,
             &mut Attack,
@@ -483,7 +436,7 @@ fn collect_damage(
     config: Res<SimulationConfig>,
 ) {
     let dt = simulation_delta(&time, &state);
-    for (entity, order, position, faction, mut attack, mut energy, vision) in &mut attackers {
+    for (entity, position, faction, mut attack, mut energy, vision) in &mut attackers {
         attack.remaining = (attack.remaining - dt).max(0.0);
         if attack.remaining > 0.0 || energy.current < config.attack_energy_cost {
             continue;
@@ -494,10 +447,6 @@ fn collect_damage(
         else {
             continue;
         };
-        let ordered_target = order
-            .and_then(|order| trails.get(order.trail).ok())
-            .and_then(|trail| trail.target)
-            .filter(|target| health.get(*target).is_ok_and(|health| health.current > 0.0));
         let target = spatial
             .nearby(position.0, attack.range + 2.0)
             .filter(|entry| {
@@ -507,9 +456,8 @@ fn collect_damage(
                         <= attack.range + if entry.tower { 2.0 } else { 0.0 }
             })
             .min_by(|a, b| {
-                (Some(a.entity) != ordered_target)
-                    .cmp(&(Some(b.entity) != ordered_target))
-                    .then(a.tower.cmp(&b.tower))
+                a.tower
+                    .cmp(&b.tower)
                     .then_with(|| {
                         position
                             .0
@@ -617,7 +565,6 @@ mod tests {
             .iter(app.world())
             .map(|raw| raw.0)
             .sum::<u32>()
-            + app.world().resource::<RawElementEconomy>().spent
     }
     fn tower(app: &mut App) -> Entity {
         app.world_mut()
@@ -648,7 +595,7 @@ mod tests {
             assert_eq!(attack.range, 6.0);
         }
         let mut ids = Vec::new();
-        for (id, energy, raw, vision, state, _) in app
+        for (id, energy, raw, vision, state) in app
             .world_mut()
             .query_filtered::<(
                 &SimulationId,
@@ -656,7 +603,6 @@ mod tests {
                 &RawElement,
                 &Vision,
                 &GatheringState,
-                &ForwardingCursor,
             ), With<Minion>>()
             .iter(app.world())
         {
@@ -674,24 +620,27 @@ mod tests {
     }
 
     #[test]
-    fn paid_spawning_spends_all_affordable_stock_and_respects_origin_cap() {
+    fn stock_expands_radius_without_spending_or_replacing_lost_minions() {
         let mut app = app();
         let tower = tower(&mut app);
         app.world_mut().get_mut::<RawElement>(tower).unwrap().0 = 17;
-        app.world_mut().get_mut::<Spawner>(tower).unwrap().cap = 5;
+        let lost = app
+            .world_mut()
+            .query_filtered::<Entity, With<Minion>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        app.world_mut().despawn(lost);
         let mut schedule = Schedule::default();
-        schedule.add_systems(spawn_minions);
-        schedule.run(app.world_mut());
-        assert_eq!(count::<Minion>(&mut app), 17);
-        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 7);
-        assert_eq!(app.world().resource::<RawElementEconomy>().spent, 10);
-        schedule.run(app.world_mut());
-        assert_eq!(count::<Minion>(&mut app), 17);
-        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 7);
-        app.world_mut().get_mut::<Spawner>(tower).unwrap().cap = 100;
-        schedule.run(app.world_mut());
-        assert_eq!(count::<Minion>(&mut app), 18);
-        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 2);
+        schedule.add_systems(grow_tower_radius);
+        for _ in 0..20 {
+            schedule.run(app.world_mut());
+        }
+        assert_eq!(count::<Minion>(&mut app), 14);
+        assert_eq!(app.world().get::<RawElement>(tower).unwrap().0, 17);
+        let emitter = app.world().get::<InfluenceEmitter>(tower).unwrap();
+        assert_eq!(emitter.radius, 32.0);
+        assert_eq!(emitter.strength, 4.0);
     }
 
     #[test]
@@ -1063,88 +1012,6 @@ mod tests {
     }
 
     #[test]
-    fn ordered_target_wins_at_six_units_and_falls_back_when_friendly() {
-        let mut app = app();
-        let factions = app.world().resource::<FactionEntities>().0.clone();
-        let center = Vec2::splat(1000.0);
-        let target = app
-            .world_mut()
-            .spawn((
-                Minion,
-                Position(center + Vec2::X * 6.0),
-                Allegiance(factions[1]),
-                Health {
-                    current: 30.0,
-                    max: 30.0,
-                },
-            ))
-            .id();
-        let closer = app
-            .world_mut()
-            .spawn((Minion, Position(center + Vec2::X), Allegiance(factions[1])))
-            .id();
-        let attacker = app
-            .world_mut()
-            .spawn((
-                Minion,
-                Position(center),
-                Allegiance(factions[0]),
-                Vision { radius: 15.0 },
-                EnergyStore {
-                    current: 5,
-                    capacity: 5,
-                },
-                Attack {
-                    damage: 10.0,
-                    range: 6.0,
-                    cooldown: 0.8,
-                    remaining: 0.0,
-                },
-            ))
-            .id();
-        let trail = app
-            .world_mut()
-            .spawn(AttackTrail {
-                tower: Entity::PLACEHOLDER,
-                path_id: 0,
-                sequence: 0,
-                target: Some(target),
-            })
-            .id();
-        app.world_mut()
-            .entity_mut(attacker)
-            .insert(AttackOrder { trail });
-        let mut combat = Schedule::default();
-        combat.add_systems((rebuild_index, collect_damage).chain());
-        combat.run(app.world_mut());
-        let shot = app
-            .world_mut()
-            .query::<(Entity, &EnergyProjectile)>()
-            .iter(app.world())
-            .map(|(entity, shot)| (entity, shot.target))
-            .next()
-            .unwrap();
-        assert_eq!(shot.1, target);
-        assert_eq!(app.world().get::<ShootingPause>(attacker).unwrap().0, 1.0);
-        app.world_mut().despawn(shot.0);
-        app.world_mut().get_mut::<Allegiance>(target).unwrap().0 = factions[0];
-        app.world_mut()
-            .get_mut::<Attack>(attacker)
-            .unwrap()
-            .remaining = 0.0;
-        combat.run(app.world_mut());
-        assert_eq!(
-            app.world_mut()
-                .query::<&EnergyProjectile>()
-                .iter(app.world())
-                .next()
-                .unwrap()
-                .target,
-            closer
-        );
-    }
-
-    #[test]
     fn victory_requires_one_surviving_tower_and_empty_arena_is_a_draw() {
         let mut app = app();
         let towers: Vec<_> = app
@@ -1214,11 +1081,9 @@ mod tests {
         assert_eq!(count::<Minion>(&mut app), 15);
         assert_eq!(count::<Tower>(&mut app), 5);
         assert_eq!(count::<Trail>(&mut app), 0);
-        assert_eq!(count::<Link>(&mut app), 0);
         assert_eq!(app.world().resource::<MatchState>().elapsed, 0.0);
         assert_eq!(app.world().resource::<EnergyClock>().pulses, 0);
         assert_eq!(app.world().resource::<EnergyClock>().elapsed, 0.0);
-        assert_eq!(app.world().resource::<RawElementEconomy>().spent, 0);
         assert_eq!(
             total(&mut app),
             app.world().resource::<RawElementEconomy>().initial
@@ -1244,11 +1109,10 @@ mod tests {
         for _ in 0..180 {
             step(&mut app, 100);
             let minions = count::<Minion>(&mut app);
-            assert!(minions <= 500);
+            assert!(minions <= 15);
             assert!(count::<Tower>(&mut app) <= 5);
             assert!(count::<RawElementDeposit>(&mut app) as u32 <= initial);
             assert!(count::<Trail>(&mut app) <= 500 * 100);
-            assert!(count::<Link>(&mut app) <= minions);
             assert_eq!(total(&mut app), initial);
             for energy in app.world_mut().query::<&EnergyStore>().iter(app.world()) {
                 assert!(energy.current <= energy.capacity);

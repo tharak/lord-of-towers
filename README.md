@@ -56,6 +56,6 @@ bash scripts/build-web.sh
 python3 scripts/serve-web.py
 ```
 
-Open http://127.0.0.1:4173/lord-of-towers/. The build script installs the wasm-bindgen CLI version recorded in Cargo.lock. WebGL2 needs no server-side application or cross-origin isolation.
+Open http://127.0.0.1:4173/lord-of-towers/. The build script installs the wasm-bindgen CLI version recorded in Cargo.lock. WebGL2 needs no server-side application or cross-origin isolation. Each release loads JavaScript and WebAssembly from a commit-specific package directory so browser caches cannot mix game assets across releases.
 
 GitHub Actions checks native Rust compilation with `cargo check --locked` and builds release WebAssembly. Main deploys to GitHub Pages after both succeed. There are no automated unit tests, browser tests, extended simulations, or deployed smoke tests. Runtime issues are investigated when reported by the user. Local compilation runs only when requested.

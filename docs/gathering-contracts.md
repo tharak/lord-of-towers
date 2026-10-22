@@ -1,6 +1,6 @@
 # Gathering contracts
 
-Thirty seeded homogeneous deposits contain 5–10 units each, six deposits per element. `ElementInventory.units` is an ordered deque shared by deposit quantities, minion cargo, tower stock and order reservations. Deposits never recharge. A minion collects at most one cargo unit and delivers within three units of a friendly tower. Death drops preserve types; empty deposits despawn.
+Thirty seeded homogeneous deposits contain 5–10 units each, six deposits per element. `ElementInventory.units` is an ordered deque shared by deposit quantities, minion cargo, tower stock and order reservations. Deposits never recharge. Each new pickup first fills an empty equipment slot, skipping a slot reserved by a pending exchange. Only overflow becomes the single gathered cargo unit. Unequipped units also travel as cargo and can accompany that unit. Cargo is delivered within three units of a friendly tower. Death drops preserve types; empty deposits despawn.
 
 Navigation uses each minion's equipped-air/void-derived local vision. Only friendly tower delivery locations are globally known. Priorities are valid tower defense, pending tower-order travel or cargo return, closest visible enemy, visible deposit, freshest unvisited friendly trail, then random exploration. Carriers and ordered minions shoot in-range enemies without generic pursuit. Defense ends when the attacker leaves vision or the tower/attacker becomes invalid.
 

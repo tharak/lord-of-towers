@@ -14,7 +14,12 @@ impl Plugin for EquipmentPlugin {
                 PreUpdate,
                 cleanup_orders.after(crate::simulation::restart_match),
             )
-            .add_systems(FixedUpdate, process_commands.in_set(SimSet::PlayerCommands))
+            .add_systems(
+                FixedUpdate,
+                (process_commands, recompute_attributes)
+                    .chain()
+                    .in_set(SimSet::PlayerCommands),
+            )
             .add_systems(
                 FixedUpdate,
                 navigate_orders.in_set(SimSet::EquipmentNavigation),
@@ -235,6 +240,27 @@ fn process_commands(world: &mut World) {
             };
             reserved.units.push_back(stock.units.remove(index).unwrap());
         }
+        if let TowerOrderAction::ReturnEquipment { slot } = action {
+            // Unequipped units are physical cargo during the homeward trip.
+            let element = world.get_mut::<EquippedElements>(minion).unwrap().slots[slot]
+                .take()
+                .unwrap();
+            world
+                .get_mut::<ElementInventory>(minion)
+                .unwrap()
+                .units
+                .push_back(element);
+            let position = world.get::<Position>(minion).unwrap().0;
+            let trip = crate::gathering::allocate_trip(world);
+            world.entity_mut(minion).insert((
+                GatheringState::Returning { tower: Some(tower) },
+                TrailEmitter {
+                    trip,
+                    next_sequence: 0,
+                    last_position: position,
+                },
+            ));
+        }
         let source_position = world.get::<Position>(tower).unwrap().0;
         world.spawn((
             Name::new("Equipment order"),
@@ -301,14 +327,8 @@ fn transfer_orders(world: &mut World) {
                     returned.push(element);
                 }
             }
-            TowerOrderAction::ReturnEquipment { slot } => {
-                if let Some(mut gear) = world.get_mut::<EquippedElements>(order.minion) {
-                    if let Some(old) = gear.slots[slot].take() {
-                        returned.push(old);
-                    }
-                }
-            }
-            TowerOrderAction::DeliverCargo => {}
+            // ReturnEquipment already moved its unit into cargo when accepted.
+            TowerOrderAction::ReturnEquipment { .. } | TowerOrderAction::DeliverCargo => {}
         }
         // All homeward orders deliver cargo at their actual destination.
         if let Some(mut cargo) = world.get_mut::<ElementInventory>(order.minion) {

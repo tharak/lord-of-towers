@@ -405,6 +405,14 @@ fn carrier_marker(
 
 fn collect(world: &mut World) {
     let radius = world.resource::<SimulationConfig>().pickup_radius;
+    let reserved_slots: HashSet<_> = world
+        .query::<&EquipmentOrder>()
+        .iter(world)
+        .filter_map(|order| match order.action {
+            TowerOrderAction::Equip { slot } => Some((order.minion, slot)),
+            _ => None,
+        })
+        .collect();
     let mut deposits: Vec<_> = world
         .query_filtered::<Entity, With<ElementDeposit>>()
         .iter(world)
@@ -436,19 +444,29 @@ fn collect(world: &mut World) {
             let Some(owner) = world.get::<Allegiance>(entity).copied() else {
                 continue;
             };
-            let p = world.get::<Position>(entity).unwrap().0;
-            let tower = nearest_tower(world, p, owner.0);
-            let trip = allocate_trip(world);
-            world.entity_mut(entity).insert((
-                ElementInventory::homogeneous(element, 1),
-                GatheringState::Returning { tower },
-                TrailEmitter {
-                    trip,
-                    next_sequence: 1,
-                    last_position: p,
-                },
-            ));
-            carrier_marker(world, p, owner, trip, 0);
+            let empty_slot = world.get::<EquippedElements>(entity).and_then(|gear| {
+                gear.slots.iter().enumerate().find_map(|(slot, equipped)| {
+                    (equipped.is_none() && !reserved_slots.contains(&(entity, slot)))
+                        .then_some(slot)
+                })
+            });
+            if let Some(slot) = empty_slot {
+                world.get_mut::<EquippedElements>(entity).unwrap().slots[slot] = Some(element);
+            } else {
+                let p = world.get::<Position>(entity).unwrap().0;
+                let tower = nearest_tower(world, p, owner.0);
+                let trip = allocate_trip(world);
+                world.entity_mut(entity).insert((
+                    ElementInventory::homogeneous(element, 1),
+                    GatheringState::Returning { tower },
+                    TrailEmitter {
+                        trip,
+                        next_sequence: 1,
+                        last_position: p,
+                    },
+                ));
+                carrier_marker(world, p, owner, trip, 0);
+            }
             let mut stock = world.get_mut::<ElementInventory>(deposit).unwrap();
             stock.units.pop_front();
             if stock.is_empty() {

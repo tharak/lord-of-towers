@@ -373,6 +373,38 @@ pub(crate) fn marker(
         ))
         .id()
 }
+/// Carriers renew nearby friendly trails without changing their identity or path.
+fn carrier_marker(
+    world: &mut World,
+    position: Vec2,
+    owner: Allegiance,
+    trip: u64,
+    sequence: u32,
+) -> Entity {
+    let config = world.resource::<SimulationConfig>();
+    let radius_squared = config.trail_spacing * config.trail_spacing;
+    let lifetime = config.trail_lifetime;
+    let mut candidates: Vec<_> = world
+        .query::<(Entity, &Position, &Allegiance, &Trail)>()
+        .iter(world)
+        .filter_map(|(entity, p, allegiance, trail)| {
+            let distance = position.distance_squared(p.0);
+            (*allegiance == owner && trail.remaining > 0.0 && distance <= radius_squared)
+                .then_some((entity, distance))
+        })
+        .collect();
+    candidates.sort_by(|a, b| {
+        a.1.total_cmp(&b.1)
+            .then_with(|| stable(world, a.0).cmp(&stable(world, b.0)))
+    });
+    if let Some(&(entity, _)) = candidates.first() {
+        world.get_mut::<Trail>(entity).unwrap().remaining = lifetime;
+        entity
+    } else {
+        marker(world, position, owner, trip, sequence)
+    }
+}
+
 fn collect(world: &mut World) {
     let radius = world.resource::<SimulationConfig>().pickup_radius;
     let mut deposits: Vec<_> = world
@@ -418,7 +450,7 @@ fn collect(world: &mut World) {
                     last_position: p,
                 },
             ));
-            marker(world, p, owner, trip, 0);
+            carrier_marker(world, p, owner, trip, 0);
             let mut stock = world.get_mut::<ElementInventory>(deposit).unwrap();
             stock.units.pop_front();
             if stock.is_empty() {
@@ -472,7 +504,7 @@ fn emit(world: &mut World) {
         .map(|(e, p, a, t)| (e, p.0, *a, *t))
         .collect();
     for (entity, p, owner, emitter) in emissions {
-        marker(world, p, owner, emitter.trip, emitter.next_sequence);
+        carrier_marker(world, p, owner, emitter.trip, emitter.next_sequence);
         let mut emitter = world.get_mut::<TrailEmitter>(entity).unwrap();
         emitter.next_sequence += 1;
         emitter.last_position = p;

@@ -24,7 +24,7 @@ Movement priority is valid tower defense alert → cargo return → closest visi
 
 Collectors retain a friendly delivery tower until missing or hostile. With no friendly tower they explore while keeping cargo. Pickup radius is one; delivery radius three. Exploration retargets on arrival or every three simulation seconds within map bounds.
 
-`GatheringState` is Exploring, Following { trip, sequence }, or Returning { tower }. Trail selection reevaluates every tick, ranking visible friendly unvisited markers by highest remaining lifetime, then distance and stable identity. Arrival within one unit records that marker in private `VisitedTrailMarkers` and immediately selects another candidate. Missing eligible markers resume exploration. Despawned markers are pruned from memory; erasure, eviction and decay invalidate missing targets.
+`GatheringState` is Exploring, Following { trip, sequence }, or Returning { tower }. Trail selection reevaluates every tick, ranking visible friendly unvisited markers by highest remaining lifetime, then distance and stable identity. Choosing a marker records every other live friendly marker currently inside that minion's vision in private `VisitedTrailMarkers`. The selected marker stays eligible until arrival within one unit, when it is recorded too and selection continues. Memory belongs to each minion; no trail entity is modified or removed. Outside-vision and enemy markers are not marked. Newly appearing markers remain eligible for freshness-based redirection. Missing eligible markers resume exploration. Despawned markers are pruned from memory; erasure, eviction and decay invalidate missing targets.
 
 ## Shared trails
 

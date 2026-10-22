@@ -60,7 +60,7 @@ struct VisualAssets {
     influence_ring: Handle<Mesh>,
     influence_materials: Vec<Handle<StandardMaterial>>,
     energy: Handle<Mesh>,
-    raw: Handle<StandardMaterial>,
+    elements: [Handle<StandardMaterial>; 5],
     trail_materials: Vec<Vec<Handle<StandardMaterial>>>,
     materials: Vec<Handle<StandardMaterial>>,
 }
@@ -165,10 +165,13 @@ fn setup(
             })
             .collect(),
         energy: meshes.add(Sphere::new(0.2)),
-        raw: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.95, 1.0, 0.8),
-            unlit: true,
-            ..default()
+        elements: Element::ALL.map(|element| {
+            materials.add(StandardMaterial {
+                base_color: element.color(),
+                perceptual_roughness: 0.45,
+                unlit: element != Element::Void,
+                ..default()
+            })
         }),
         trail_materials,
         materials: palette,
@@ -431,23 +434,23 @@ fn sync_stacks(world: &mut World) {
             Entity,
             Option<&Tower>,
             Option<&Health>,
-            Option<&RawElement>,
+            Option<&ElementInventory>,
             Option<&Allegiance>,
-        ), Or<(With<Tower>, With<RawElementDeposit>)>>()
+        ), Or<(With<Tower>, With<ElementDeposit>)>>()
         .iter(world)
         .map(|(entity, tower, health, raw, allegiance)| {
             (
                 entity,
                 tower.is_some(),
                 health_count(health),
-                raw.map_or(0, |raw| raw.0 as usize),
+                raw.cloned().unwrap_or_default(),
                 allegiance.copied(),
             )
         })
         .collect();
     for (parent, tower, health, raw, allegiance) in parents {
         let stack = Stack {
-            count: if tower { health } else { raw },
+            count: if tower { health } else { raw.total() },
             columns: if tower { 4 } else { 1 },
             spacing: if tower {
                 Vec3::splat(0.68)
@@ -464,8 +467,12 @@ fn sync_stacks(world: &mut World) {
         };
         let material = allegiance
             .and_then(|a| world.get::<Faction>(a.0))
-            .map_or_else(|| assets.raw.clone(), |f| assets.materials[f.index].clone());
+            .map_or_else(
+                || assets.elements[Element::Fire as usize].clone(),
+                |f| assets.materials[f.index].clone(),
+            );
         let beacon_mesh = assets.energy.clone();
+        let element_materials = assets.elements.clone();
         let children: Vec<_> = world
             .get::<Children>(parent)
             .map(|children| {
@@ -480,6 +487,11 @@ fn sync_stacks(world: &mut World) {
         }
         for index in 0..stack.count {
             let transform = stack.transform(index);
+            let material = if tower {
+                material.clone()
+            } else {
+                element_materials[raw.units[index] as usize].clone()
+            };
             if let Some(child) = children.get(index) {
                 world
                     .entity_mut(*child)
@@ -539,13 +551,14 @@ fn donut_transform(index: usize, tower: bool) -> Transform {
 fn sync_donut_visuals(world: &mut World) {
     let assets = world.resource::<VisualAssets>();
     let mesh = assets.donut.clone();
-    let material = assets.raw.clone();
+    let materials = assets.elements.clone();
     let inventories: Vec<_> = world
-        .query_filtered::<(Entity, &RawElement, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>()
+        .query_filtered::<(Entity, &ElementInventory, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>()
         .iter(world)
-        .map(|(entity, raw, tower)| (entity, raw.0 as usize, tower.is_some()))
+        .map(|(entity, raw, tower)| (entity, raw.clone(), tower.is_some()))
         .collect();
-    for (parent, count, tower) in inventories {
+    for (parent, inventory, tower) in inventories {
+        let count = inventory.total();
         let mut children: Vec<Entity> = world
             .get::<Children>(parent)
             .map(|children| {
@@ -567,16 +580,28 @@ fn sync_donut_visuals(world: &mut World) {
         for (index, child) in children.iter().enumerate() {
             let mut transform = donut_transform(index, tower);
             transform.translation.y += offset;
-            world.entity_mut(*child).insert(transform);
+            world.entity_mut(*child).insert((
+                Name::new(format!(
+                    "{} crown donut {}",
+                    inventory.units[index].name(),
+                    index + 1
+                )),
+                transform,
+                MeshMaterial3d(materials[inventory.units[index] as usize].clone()),
+            ));
         }
         for index in children.len()..count {
             world.spawn((
-                Name::new(format!("Crown donut {}", index + 1)),
+                Name::new(format!(
+                    "{} crown donut {}",
+                    inventory.units[index].name(),
+                    index + 1
+                )),
                 EntityKind::DonutVisual,
                 DonutVisual,
                 ChildOf(parent),
                 Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
+                MeshMaterial3d(materials[inventory.units[index] as usize].clone()),
                 {
                     let mut transform = donut_transform(index, tower);
                     transform.translation.y += offset;
@@ -586,7 +611,7 @@ fn sync_donut_visuals(world: &mut World) {
         }
     }
 }
-// Keep energy separate from the raw-element crown, in rings around the body.
+// Keep energy separate from the element crown, in rings around the body.
 fn energy_orb_transform(index: usize) -> Transform {
     let angle = (index % 8) as f32 * std::f32::consts::TAU / 8.0;
     Transform::from_xyz(
@@ -697,14 +722,14 @@ fn sync_visuals(
 fn attach_resource_visuals(
     mut commands: Commands,
     assets: Res<VisualAssets>,
-    deposits: Query<Entity, (With<RawElementDeposit>, Without<Transform>)>,
+    deposits: Query<Entity, (With<ElementDeposit>, Without<Transform>)>,
     trails: Query<(Entity, &Allegiance), (With<Trail>, Without<Mesh3d>)>,
     factions: Query<&Faction>,
 ) {
     for entity in &deposits {
         commands
             .entity(entity)
-            .insert((MeshMaterial3d(assets.raw.clone()), Transform::default()));
+            .insert((Transform::default(), Visibility::Inherited));
     }
     for (entity, allegiance) in &trails {
         if let Ok(faction) = factions.get(allegiance.0) {
@@ -726,7 +751,7 @@ fn sync_gathering_visuals(
     assets: Res<VisualAssets>,
     config: Res<SimulationConfig>,
     factions: Query<&Faction>,
-    mut deposits: Query<(&Position, &mut Transform), (With<RawElementDeposit>, Without<Trail>)>,
+    mut deposits: Query<(&Position, &mut Transform), (With<ElementDeposit>, Without<Trail>)>,
     mut trails: Query<
         (
             &Position,
@@ -735,7 +760,7 @@ fn sync_gathering_visuals(
             &mut Transform,
             &mut MeshMaterial3d<StandardMaterial>,
         ),
-        (Without<RawElementDeposit>, Without<DonutVisual>),
+        (Without<ElementDeposit>, Without<DonutVisual>),
     >,
 ) {
     for (position, mut transform) in &mut deposits {
@@ -921,7 +946,7 @@ fn update_hud(
     field: Res<InfluenceField>,
     factions: Query<&Faction>,
     units: Query<
-        (&Allegiance, Option<&Tower>, Option<&RawElement>),
+        (&Allegiance, Option<&Tower>, Option<&ElementInventory>),
         Or<(With<Tower>, With<Minion>)>,
     >,
     mut texts: Query<(&mut Text, Option<&FactionText>), Or<(With<StatusText>, With<FactionText>)>>,
@@ -933,7 +958,7 @@ fn update_hud(
         if let Ok(faction) = factions.get(allegiance.0) {
             if tower.is_some() {
                 towers[faction.index] += 1;
-                stock[faction.index] += raw.map_or(0, |raw| raw.0);
+                stock[faction.index] += raw.map_or(0, ElementInventory::total);
             } else {
                 minions[faction.index] += 1;
             }
@@ -943,7 +968,7 @@ fn update_hud(
     for (mut text, faction) in &mut texts {
         text.0 = if let Some(FactionText(i)) = faction {
             format!(
-                "{}  |  {} towers | {} minions | rawElement {} | {:.0}%",
+                "{}  |  {} towers | {} minions | Element total {} | {:.0}%",
                 FACTION_NAMES[*i], towers[*i], minions[*i], stock[*i], territory[*i]
             )
         } else if let Some(winner) = state.winner {
@@ -1005,11 +1030,11 @@ fn browser_state(
     inspector: Res<InspectorState>,
     minions: Query<(), With<Minion>>,
     towers: Query<Option<&PlayerControlled>, With<Tower>>,
-    deposits: Query<&RawElement, With<RawElementDeposit>>,
+    deposits: Query<&ElementInventory, With<ElementDeposit>>,
     crown: Query<(), With<DonutVisual>>,
-    inventories: Query<(&RawElement, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>,
+    inventories: Query<(&ElementInventory, Option<&Tower>), Or<(With<Tower>, With<Minion>)>>,
     trails: Query<(), With<Trail>>,
-    economy: Res<RawElementEconomy>,
+    economy: Res<ElementEconomy>,
     drawn: Query<(), With<PlayerDrawnTrail>>,
     stores: Query<&EnergyStore, With<Minion>>,
     clock: Res<EnergyClock>,
@@ -1040,35 +1065,55 @@ fn browser_state(
             ("data-speed", state.speed.to_string()),
             ("data-elapsed", state.elapsed.to_string()),
             ("data-inspector", inspector.open.to_string()),
-            ("data-raw-deposits", deposits.iter().count().to_string()),
+            (
+                "data-elements-deposits",
+                deposits.iter().count().to_string(),
+            ),
             ("data-donut-visuals", crown.iter().count().to_string()),
             (
-                "data-raw-remaining",
+                "data-elements-remaining",
                 deposits
                     .iter()
-                    .map(|raw| u64::from(raw.0))
+                    .map(|raw| raw.total() as u64)
                     .sum::<u64>()
                     .to_string(),
             ),
             (
-                "data-raw-carried",
+                "data-elements-carried",
                 inventories
                     .iter()
                     .filter(|(_, tower)| tower.is_none())
-                    .map(|(raw, _)| u64::from(raw.0))
+                    .map(|(raw, _)| raw.total() as u64)
                     .sum::<u64>()
                     .to_string(),
             ),
             (
-                "data-raw-stock",
+                "data-elements-stock",
                 inventories
                     .iter()
                     .filter(|(_, tower)| tower.is_some())
-                    .map(|(raw, _)| u64::from(raw.0))
+                    .map(|(raw, _)| raw.total() as u64)
                     .sum::<u64>()
                     .to_string(),
             ),
-            ("data-raw-initial", economy.initial.to_string()),
+            (
+                "data-elements-initial",
+                economy
+                    .initial
+                    .iter()
+                    .map(|&count| u64::from(count))
+                    .sum::<u64>()
+                    .to_string(),
+            ),
+            (
+                "data-elements-consumed",
+                economy
+                    .consumed
+                    .iter()
+                    .map(|&count| u64::from(count))
+                    .sum::<u64>()
+                    .to_string(),
+            ),
             ("data-trails", trails.iter().count().to_string()),
             ("data-drawn-trails", drawn.iter().count().to_string()),
             (

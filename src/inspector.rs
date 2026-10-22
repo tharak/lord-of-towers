@@ -1,7 +1,7 @@
 //! A bounded view into the live ECS world, never an entity registry.
 use crate::model::{
-    Allegiance, EnergyStore, EntityKind, FACTION_NAMES, Faction, GatheringState, InfluenceEmitter,
-    PlayerDrawnTrail, RawElement, Trail, Vision,
+    Allegiance, Attack, ElementInventory, ElementStats, EnergyStore, EntityKind, FACTION_NAMES,
+    Faction, GatheringState, Health, InfluenceEmitter, Movement, PlayerDrawnTrail, Trail, Vision,
 };
 use bevy::prelude::*;
 use std::fmt::Write;
@@ -46,7 +46,7 @@ const KINDS: [EntityKind; 15] = [
     EntityKind::Faction,
     EntityKind::Tower,
     EntityKind::Minion,
-    EntityKind::RawElementDeposit,
+    EntityKind::ElementDeposit,
     EntityKind::Trail,
     EntityKind::DonutVisual,
     EntityKind::EnergyOrbVisual,
@@ -241,8 +241,38 @@ fn append_energy_details(text: &mut String, entity: &EntityRef) {
     if let Some(store) = entity.get::<EnergyStore>() {
         let _ = writeln!(text, "Energy: {}/{}", store.current, store.capacity);
     }
-    if let Some(raw) = entity.get::<RawElement>() {
-        let _ = writeln!(text, "rawElement: {}", raw.0);
+    if let Some(inventory) = entity.get::<ElementInventory>() {
+        let counts = inventory.counts();
+        let _ = writeln!(
+            text,
+            "Elements: {} | Fire {} Water {} Earth {} Air {} Void {}",
+            inventory.total(),
+            counts[0],
+            counts[1],
+            counts[2],
+            counts[3],
+            counts[4]
+        );
+    }
+    if let Some(stats) = entity.get::<ElementStats>() {
+        let _ = writeln!(
+            text,
+            "Element stats: Fire {} Water {} Earth {} Air {} Void {}",
+            stats.fire, stats.water, stats.earth, stats.air, stats.void
+        );
+    }
+    if let Some(health) = entity.get::<Health>() {
+        let _ = writeln!(text, "Health: {:.1}/{:.1}", health.current, health.max);
+    }
+    if let Some(movement) = entity.get::<Movement>() {
+        let _ = writeln!(text, "Movement speed: {:.1}", movement.speed);
+    }
+    if let Some(attack) = entity.get::<Attack>() {
+        let _ = writeln!(
+            text,
+            "Attack: {:.1} damage | {:.1} range | {:.1}s cooldown",
+            attack.damage, attack.range, attack.cooldown
+        );
     }
     if let Some(vision) = entity.get::<Vision>() {
         let _ = writeln!(text, "Vision: {:.1}", vision.radius);

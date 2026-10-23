@@ -113,7 +113,7 @@ impl Default for SimulationConfig {
             starting_minions: 3,
             tower_influence_radius: 15.0,
             minion_speed: 4.0,
-            minion_health: 30.0,
+            minion_health: 90.0,
             tower_health: 180.0,
             seed: 42,
             deposit_count: 30,

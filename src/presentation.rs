@@ -62,6 +62,7 @@ struct VisualAssets {
     sphere: Handle<Mesh>,
     elements: [Handle<StandardMaterial>; 5],
     trail_materials: Vec<Vec<Handle<StandardMaterial>>>,
+    minion_health_materials: Vec<Vec<Handle<StandardMaterial>>>,
     materials: Vec<Handle<StandardMaterial>>,
 }
 #[derive(Component)]
@@ -74,6 +75,7 @@ struct EquippedElementVisual {
 #[derive(Component)]
 struct ProductionIndicator;
 const TRAIL_BUCKETS: usize = 8;
+const HEALTH_PERCENT_STEPS: usize = 100;
 
 #[derive(Component)]
 struct SpectatorCamera;
@@ -150,6 +152,24 @@ fn setup(
                 .collect()
         })
         .collect();
+    // Shared shades keep health presentation independent of minion lifetimes.
+    let minion_health_materials = FACTION_RGB
+        .iter()
+        .map(|rgb| {
+            (0..=HEALTH_PERCENT_STEPS)
+                .map(|step| {
+                    let fraction = step as f32 / HEALTH_PERCENT_STEPS as f32;
+                    let [r, g, b] =
+                        rgb.map(|channel| (89.0 + (channel as f32 - 89.0) * fraction) / 255.0);
+                    materials.add(StandardMaterial {
+                        base_color: Color::srgb(r, g, b),
+                        perceptual_roughness: 0.8,
+                        ..default()
+                    })
+                })
+                .collect()
+        })
+        .collect();
     commands.insert_resource(VisualAssets {
         tower,
         minion,
@@ -178,6 +198,7 @@ fn setup(
             })
         }),
         trail_materials,
+        minion_health_materials,
         materials: palette,
     });
     commands.spawn((
@@ -786,20 +807,31 @@ fn sync_visuals(
             &Position,
             &Allegiance,
             Option<&Tower>,
+            &Health,
             &mut Transform,
             &mut MeshMaterial3d<StandardMaterial>,
         ),
         Or<(With<Tower>, With<Minion>)>,
     >,
 ) {
-    for (position, allegiance, tower, mut transform, mut material) in &mut entities {
+    for (position, allegiance, tower, health, mut transform, mut material) in &mut entities {
         transform.translation = Vec3::new(
             position.0.x,
             if tower.is_some() { 0.0 } else { 0.77 },
             position.0.y,
         );
         if let Ok(faction) = factions.get(allegiance.0) {
-            let handle = &assets.materials[faction.index];
+            let handle = if tower.is_some() {
+                &assets.materials[faction.index]
+            } else {
+                let fraction = if health.max > 0.0 {
+                    (health.current / health.max).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let step = (fraction * HEALTH_PERCENT_STEPS as f32).round() as usize;
+                &assets.minion_health_materials[faction.index][step]
+            };
             if material.0 != *handle {
                 material.0 = handle.clone();
             }

@@ -24,7 +24,7 @@
 | `Trail`, private `VisitedTrailMarkers` | Thirty-second breadcrumb and per-minion visited identities. Selection marks all other visible friendly markers visited; arrival marks selected marker. |
 | `InfluenceEmitter` | Fixed radius/strength for territory and tower alert recipients. |
 
-Fire modifies damage, water speed, earth maximum health, air vision. Attribute multiplier is `1 + .30 × equipped_copies × (1 + .10 × equipped_void_copies)`. No matching equipped copies gives base values (10/4/30/15). Void alone grants no bonus. Birth gear is empty.
+Fire modifies damage, water speed, earth maximum health, air vision. Attribute multiplier is `1 + .30 × equipped_copies × (1 + .10 × equipped_void_copies)`. No matching equipped copies gives base values (10/4/90/15). Void alone grants no bonus. Birth gear is empty.
 
 ## Visual and UI components
 
@@ -60,6 +60,8 @@ Fixed steps run at 30 Hz, scale with speed and stop when paused/hidden/won. Inva
 
 New pickups fill the first empty equipment slot not reserved by an exchange. Otherwise the pickup becomes gathered cargo. ReturnEquipment moves gear into cargo immediately; that cargo may accompany one gathered unit, stays carried if an order is replaced, and is credited to stock only on delivery.
 
-Equipment percentages are fixed: Fire +30% base damage, Water +30% base speed, Earth +30% base maximum health, Air +30% base vision, per equipped copy. Void increases these bonuses by 10% per equipped copy. Birth recipe points remain metadata and do not change these rates. One Fire gives 13 damage; Fire + Void gives 13.3; three Fire gives 19. Bases remain 10 damage, 4 units/s, 30 health and 15 vision.
+Equipment percentages are fixed: Fire +30% base damage, Water +30% base speed, Earth +30% base maximum health, Air +30% base vision, per equipped copy. Void increases these bonuses by 10% per equipped copy. Birth recipe points do not change equipment bonus rates; permanent Earth determines friendly-base healing. One Fire gives 13 damage; Fire + Void gives 13.3; three Fire gives 19. Bases remain 10 damage, 4 units/s, 90 health and 15 vision.
 
 Pointer input distinguishes tap from drag with an eight-pixel threshold. The real minion follows at current upgraded speed and catches a stationary pointer. Release keeps the last destination. Held drag cancellation handles second fingers, touch cancellation, focus loss and invalid release locations; normal two-finger camera controls remain. Dragging preserves cargo and pending equipment reservations, permits incoming damage and cargo trails, but blocks shooting/gathering/exchanges until completion. Paused input can update intent while movement stays frozen.
+
+Inside any living friendly tower’s influence circle (radius 15 by default), minions recover 1 HP per simulation second per permanent Earth point: starting minions heal 2 HP/s, and each Earth unit in a birth recipe adds 1 HP/s. Equipped Earth changes maximum health but does not change this healing rate. Healing continues during combat and dragging, stops at maximum health, and does not stack across overlapping friendly circles. Enemy bases and territory influence from minions grant no healing. Damage and destruction resolve before healing; dead units cannot be revived. Healing stops while paused, hidden or after victory and scales with simulation speed.

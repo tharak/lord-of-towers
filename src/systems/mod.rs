@@ -7,3 +7,5 @@ pub mod inspector;
 pub mod interaction;
 pub mod presentation;
 pub mod simulation;
+
+pub mod map_creation;

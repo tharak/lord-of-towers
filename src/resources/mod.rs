@@ -43,3 +43,13 @@ pub(crate) use spatial_index::SpatialIndex;
 pub(crate) use spawn_sequence::SpawnSequence;
 pub use trail_ids::TrailIds;
 pub(crate) use visual_assets::VisualAssets;
+
+pub mod map_creation;
+pub mod map_generation;
+pub mod map_landscape;
+pub(crate) use map_creation::MapCreation;
+pub(crate) use map_generation::MapGeneration;
+pub(crate) use map_landscape::MapLandscape;
+
+pub mod map_visual_assets;
+pub(crate) use map_visual_assets::MapVisualAssets;

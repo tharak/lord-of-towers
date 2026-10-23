@@ -15,3 +15,6 @@ pub use inspector_plugin::InspectorPlugin;
 pub use player_interaction_plugin::PlayerInteractionPlugin;
 pub use presentation_plugin::PresentationPlugin;
 pub use simulation_plugin::SimulationPlugin;
+
+pub mod map_creation_plugin;
+pub use map_creation_plugin::MapCreationPlugin;

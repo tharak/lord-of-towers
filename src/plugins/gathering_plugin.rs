@@ -1,5 +1,5 @@
 //! Resource initialization and system ordering for this subsystem.
-use crate::resources::{GatheringRuntime, TrailIds};
+use crate::resources::{ElementEconomy, GatheringRuntime, TrailIds};
 use crate::scheduling::SimSet;
 use crate::systems::gathering::delivery::deliver;
 use crate::systems::gathering::navigation::navigate;
@@ -11,6 +11,7 @@ pub struct GatheringPlugin;
 impl Plugin for GatheringPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GatheringRuntime>()
+            .init_resource::<ElementEconomy>()
             .init_resource::<TrailIds>()
             .add_systems(FixedUpdate, navigate.in_set(SimSet::Target))
             .add_systems(

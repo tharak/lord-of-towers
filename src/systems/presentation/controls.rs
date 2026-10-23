@@ -3,6 +3,9 @@ use crate::resources::{HudVisibility, MatchState};
 use bevy::prelude::*;
 
 pub(crate) fn keyboard_controls(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<MatchState>) {
+    if !state.map_ready {
+        return;
+    }
     if keys.just_pressed(KeyCode::Space) {
         state.paused = !state.paused;
     }
@@ -26,7 +29,10 @@ pub(crate) fn button_controls(
 ) {
     // Act only on a new press while updating button colors every frame.
     for (interaction, control, mut color) in &mut buttons {
-        if *interaction == Interaction::Pressed && interaction.is_changed() {
+        if *interaction == Interaction::Pressed
+            && interaction.is_changed()
+            && (state.map_ready || matches!(control, Control::Hud))
+        {
             match control {
                 Control::Pause => state.paused = !state.paused,
                 Control::Speed(speed) => state.speed = *speed,

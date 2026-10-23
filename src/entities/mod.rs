@@ -17,3 +17,5 @@ pub mod tower_beacon;
 pub mod tower_influence_visual;
 pub mod trail;
 pub mod ui;
+
+pub mod map_scene;

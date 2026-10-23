@@ -17,6 +17,7 @@ Application entities have `Name` and `EntityKind`. Entity construction is organi
 | `DonutVisual` | `DonutVisual`, `ChildOf`, torus/material/transform | One per stock/cargo unit. Towers show five fixed vertical element stacks around the beacon; minion cargo uses eight-piece crown tiers. Element-colored, reconciled to inventory; no inventory authority. Removed with parent. |
 | `EquippedElementVisual` | Presentation marker, `MatchEntity`, `ChildOf`, sphere/material/transform | At most three, one per occupied equipment slot in element color. Rebuilt when layout changes; removed with parent/restart. Stores no units. |
 | `Projectile` | `Projectile { target, damage, speed, remaining }`, `Position`, `Allegiance`; faction-colored sphere | Free shot; one-second shooter pause. Damage on impact. Despawns on impact, timeout, missing/friendly target or restart. Independent of shooter lifetime. |
+| `MapDecoration` | Presentation `MapScene` root and primitive `MapDecoration` children | Replaced on successful map generation, survives match restart; no gameplay authority. |
 | `Battlefield` | Ground primitive mesh/material/transform | Presentation startup, survives restart; samples territory with no ownership authority. |
 | `Camera` | Projection/transform, private spectator marker | Startup, survives restart; mouse/touch/keyboard camera controls. |
 | `Light` | Lighting/transform | Startup, survives restart. |

@@ -18,7 +18,8 @@ pub(crate) fn rebuild_vision_index(
     mut removed: RemovedComponents<VisionBlocker>,
 ) {
     let removed = removed.read().count() > 0;
-    if changed.is_empty() && !removed {
+    // Removal messages can expire during a pause or between widely spaced fixed ticks.
+    if changed.is_empty() && !removed && blockers.iter().count() == occlusion.source_count() {
         return;
     }
     let mut entries: Vec<_> = blockers.iter().collect();

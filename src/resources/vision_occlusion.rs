@@ -5,6 +5,7 @@ use std::collections::HashMap;
 /// Bounded spatial cache of ECS sight footprints, containing no rendering state.
 #[derive(Resource, Default)]
 pub(crate) struct VisionOcclusion {
+    source_count: usize,
     blockers: Vec<(Vec2, VisionBlocker)>,
     cells: HashMap<IVec2, Vec<usize>>,
 }
@@ -14,9 +15,11 @@ impl VisionOcclusion {
         (position / Self::CELL_SIZE).floor().as_ivec2()
     }
     pub fn rebuild(&mut self, blockers: impl IntoIterator<Item = (Vec2, VisionBlocker)>) {
+        self.source_count = 0;
         self.blockers.clear();
         self.cells.clear();
         for (position, blocker) in blockers {
+            self.source_count += 1;
             if !position.is_finite()
                 || !blocker.half_extents.is_finite()
                 || !blocker.half_extents.cmpgt(Vec2::ZERO).all()
@@ -35,6 +38,9 @@ impl VisionOcclusion {
                 }
             }
         }
+    }
+    pub fn source_count(&self) -> usize {
+        self.source_count
     }
     pub fn has_line_of_sight(&self, from: Vec2, to: Vec2) -> bool {
         if !from.is_finite() || !to.is_finite() {

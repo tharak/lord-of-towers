@@ -2,7 +2,6 @@ use crate::components::{
     Allegiance, DragControl, ElementDeposit, ElementInventory, GatheringState, Minion, Movement,
     Position, SimulationId, Tower, Trail, Vision, VisitedTrailMarkers,
 };
-use crate::entities::trail::marker;
 use crate::resources::{GatheringRuntime, MatchState, SimulationConfig};
 use crate::scheduling::simulation_delta;
 use bevy::prelude::*;

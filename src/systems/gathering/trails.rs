@@ -4,7 +4,6 @@ use crate::components::{
 use crate::entities::trail::marker;
 use crate::resources::{MatchState, SimulationConfig, TrailIds};
 use crate::scheduling::simulation_delta;
-use crate::systems::equipment::reservations::live;
 use crate::systems::gathering::navigation::stable;
 use bevy::prelude::*;
 use std::collections::HashSet;

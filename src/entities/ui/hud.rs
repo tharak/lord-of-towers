@@ -4,7 +4,6 @@ use crate::components::{
     Control, ControlBar, DesktopDetail, EntityKind, FactionText, HudRoot, HudTitle, HudToggleText,
     PauseIcon, StatusText,
 };
-use crate::systems::interaction::panel::row;
 use crate::types::{FACTION_NAMES, faction_color};
 use bevy::prelude::*;
 

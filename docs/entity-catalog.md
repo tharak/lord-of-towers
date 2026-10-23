@@ -1,6 +1,6 @@
 # Entity catalog
 
-Application entities have `Name` and `EntityKind`. Simulation entities have `MatchEntity` and are replaced on restart. Visual children inherit parent lifetime. The F3 inspector queries live ECS; no duplicate registry or unbounded spawn log is kept.
+Application entities have `Name` and `EntityKind`. Entity construction is organized by kind under `src/entities/`; each custom component has its own file under `src/components/`. Behavior lives in `src/systems/`, with scheduling in `src/plugins/`. Simulation entities have `MatchEntity` and are replaced on restart. Visual children inherit parent lifetime. The F3 inspector queries live ECS; no duplicate registry or unbounded spawn log is kept.
 
 | EntityKind | Components and relationships | Creation and lifetime |
 |---|---|---|

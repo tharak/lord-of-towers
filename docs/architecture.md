@@ -1,6 +1,6 @@
 # Architecture
 
-Gameplay and UI use Bevy ECS. `model.rs` owns shared data contracts, independent of meshes and materials. Every application entity has Name and EntityKind; match-scoped entities have MatchEntity. The live F3 inspector queries ECS directly instead of maintaining a duplicate registry.
+Gameplay and UI use Bevy ECS. Shared contracts live in `components/`, `resources/`, `types/` and `scheduling/`; `model.rs` re-exports the original API. Each custom component has its own file. Entity constructors live in `entities/`, behavior in `systems/`, and registration in `plugins/`. See the [source guide](source-guide.md) for editing examples and navigation. Simulation contracts remain independent of meshes and materials. Every application entity has Name and EntityKind; match-scoped entities have MatchEntity. The live F3 inspector queries ECS directly instead of maintaining a duplicate registry.
 
 `SimulationPlugin` owns setup, restart, movement, combat, friendly-base healing, production and victory. `GatheringPlugin` owns finite deposits, automatic pickup equipment into empty unreserved slots, local navigation, cargo transfer and fading carrier trails. `EquipmentPlugin` owns commands, reserved tower orders, equipment transfer and derived attributes. `PlayerInteractionPlugin` owns mouse/touch selection, contextual equipment/recipe UI and two-finger camera input. `InfluencePlugin` samples territory. Presentation owns primitive visuals, camera and the hideable HUD.
 

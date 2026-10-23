@@ -1,0 +1,45 @@
+//! Resources source modules.
+
+pub mod camera_gesture;
+pub mod element_economy;
+pub mod faction_entities;
+pub mod gathering_runtime;
+pub mod hud_visibility;
+pub mod influence_field;
+pub mod inspector_filter;
+pub mod inspector_state;
+pub mod match_state;
+pub mod panel_cache;
+pub mod pending_damage;
+pub mod pending_tower_alerts;
+pub mod player_commands;
+pub mod player_selection;
+pub mod pointer_state;
+pub mod random_stream;
+pub mod simulation_config;
+pub mod spatial_index;
+pub mod spawn_sequence;
+pub mod trail_ids;
+pub mod visual_assets;
+
+pub use camera_gesture::CameraGesture;
+pub use element_economy::ElementEconomy;
+pub use faction_entities::FactionEntities;
+pub(crate) use gathering_runtime::GatheringRuntime;
+pub use hud_visibility::HudVisibility;
+pub use influence_field::InfluenceField;
+pub(crate) use inspector_filter::InspectorFilter;
+pub use inspector_state::InspectorState;
+pub use match_state::MatchState;
+pub(crate) use panel_cache::PanelCache;
+pub(crate) use pending_damage::PendingDamage;
+pub use pending_tower_alerts::PendingTowerAlerts;
+pub use player_commands::PlayerCommands;
+pub use player_selection::PlayerSelection;
+pub(crate) use pointer_state::PointerState;
+pub(crate) use random_stream::RandomStream;
+pub use simulation_config::SimulationConfig;
+pub(crate) use spatial_index::SpatialIndex;
+pub(crate) use spawn_sequence::SpawnSequence;
+pub use trail_ids::TrailIds;
+pub(crate) use visual_assets::VisualAssets;

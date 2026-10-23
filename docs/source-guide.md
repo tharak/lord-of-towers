@@ -18,7 +18,7 @@ The code follows Bevy ECS: components describe individual entities, resources ho
 | Health fading, inventory visuals, camera, or HUD updates | [Presentation systems](../src/systems/presentation/mod.rs) |
 | HUD, context-panel, or inspector layout and children | [UI construction](../src/entities/ui/mod.rs) |
 | System ordering or resource registration | [Plugins](../src/plugins/mod.rs), especially [simulation registration](../src/plugins/simulation_plugin.rs) |
-| Map settings, preview generation, or creation UI | [Map creation systems](../src/systems/map_creation/mod.rs) and [map-generation guide](map-generation.md) |
+| Automatic map startup, hidden options, or preview generation | [Map creation systems](../src/systems/map_creation/mod.rs) and [map-generation guide](map-generation.md) |
 | Magna Urbis API translation and upgrades | [Adapter boundary](../src/integrations/magna_urbis/mod.rs); all upstream imports and calls stay in this folder |
 | Pause conditions and simulation speed scaling | [Scheduling](../src/scheduling/mod.rs) |
 

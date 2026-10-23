@@ -1,5 +1,6 @@
 //! Persistent map settings, seed controls, preview/start actions, and a new-map launcher.
-use crate::components::{EntityKind, MapSetupAction, MapSetupRoot, MapSetupText};
+use crate::components::{EntityKind, MapSetupAction, MapSetupRoot, MapSetupText, MapStartupRoot};
+use crate::resources::MapCreation;
 use crate::types::map_ui::MapTextRole;
 use bevy::prelude::*;
 
@@ -52,7 +53,11 @@ fn button(
             }
         });
 }
-pub(crate) fn spawn_map_setup(mut commands: Commands) {
+pub(crate) fn spawn_map_setup(mut commands: Commands, map: Res<MapCreation>) {
+    if !map.options_enabled {
+        spawn_startup_status(&mut commands, &map.message);
+        return;
+    }
     commands
         .spawn((
             Name::new("Map creation"),
@@ -177,5 +182,40 @@ pub(crate) fn spawn_map_setup(mut commands: Commands) {
                     ..default()
                 },
             ));
+        });
+}
+
+fn spawn_startup_status(commands: &mut Commands, message: &str) {
+    commands
+        .spawn((
+            Name::new("Battlefield startup"),
+            EntityKind::Ui,
+            MapStartupRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                left: percent(5),
+                right: percent(5),
+                top: percent(40),
+                padding: UiRect::all(px(16)),
+                row_gap: px(12),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            GlobalZIndex(40),
+            BackgroundColor(Color::srgba(0.025, 0.045, 0.055, 0.97)),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Name::new("Battlefield startup status"),
+                EntityKind::Ui,
+                MapSetupText(MapTextRole::Status),
+                Text::new(message),
+                TextFont {
+                    font_size: FontSize::Px(18.0),
+                    ..default()
+                },
+            ));
+            button(parent, "Retry map", MapSetupAction::Generate, None);
         });
 }

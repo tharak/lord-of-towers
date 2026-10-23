@@ -4,6 +4,8 @@ use bevy::prelude::*;
 #[derive(Resource)]
 pub(crate) struct MapCreation {
     pub settings: MapSettings,
+    /// Temporarily keep the map editor out of the player flow.
+    pub options_enabled: bool,
     pub phase: MapPhase,
     pub show_settings: bool,
     pub pending_frames: u8,
@@ -11,12 +13,23 @@ pub(crate) struct MapCreation {
 }
 impl Default for MapCreation {
     fn default() -> Self {
+        let options_enabled = false;
         Self {
             settings: MapSettings::default(),
-            phase: MapPhase::Configuring,
-            show_settings: true,
+            options_enabled,
+            phase: if options_enabled {
+                MapPhase::Configuring
+            } else {
+                MapPhase::Generating
+            },
+            show_settings: options_enabled,
             pending_frames: 0,
-            message: "Choose your map, then generate a preview.".into(),
+            message: if options_enabled {
+                "Choose your map, then generate a preview."
+            } else {
+                "Preparing the battlefield…"
+            }
+            .into(),
         }
     }
 }

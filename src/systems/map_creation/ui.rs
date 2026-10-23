@@ -1,4 +1,6 @@
-use crate::components::{ControlBar, HudRoot, MapSetupAction, MapSetupRoot, MapSetupText};
+use crate::components::{
+    ControlBar, HudRoot, MapSetupAction, MapSetupRoot, MapSetupText, MapStartupRoot,
+};
 use crate::resources::MapCreation;
 use crate::types::{
     map_settings::{MapClimate, MapDensity, MapPreset, MapRelief, MapRoads, MapWater},
@@ -21,6 +23,8 @@ pub(crate) fn update_map_ui(
         Option<&MapSetupRoot>,
         Option<&HudRoot>,
         Option<&ControlBar>,
+        Option<&MapStartupRoot>,
+        Option<&MapSetupAction>,
     )>,
     mut buttons: Query<(&MapSetupAction, &mut BackgroundColor)>,
 ) {
@@ -77,9 +81,25 @@ pub(crate) fn update_map_ui(
             MapTextRole::Launcher => if playing { "New map" } else { "Map settings" }.into(),
         };
     }
-    for (mut node, panel, hud, bar) in &mut nodes {
+    for (mut node, panel, hud, bar, startup, action) in &mut nodes {
         if panel.is_some() {
-            node.display = if !playing && map.show_settings {
+            node.display = if map.options_enabled && !playing && map.show_settings {
+                Display::Flex
+            } else {
+                Display::None
+            };
+        }
+        if startup.is_some() {
+            node.display = if playing {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        }
+        if !map.options_enabled
+            && action.is_some_and(|action| matches!(action, MapSetupAction::Generate))
+        {
+            node.display = if map.phase == MapPhase::Configuring {
                 Display::Flex
             } else {
                 Display::None

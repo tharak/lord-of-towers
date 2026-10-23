@@ -18,7 +18,7 @@ The pinned engine snapshot and original GPLv3 license live in `third_party/magna
 
 ## Rendering and gameplay
 
-The adapter samples a 2.4 km generated region into the existing battlefield bounds. Terrain elevation and slopes drive shaded terrain colors; the playable surface remains flat. River/lake and road/street layers are baked into those colors. Parcel footprints become bounded cuboid buildings with primitive roofs; trees and rocks use shared Bevy primitive meshes/materials. Scenery is capped at 400 buildings, 260 trees, and 28 rocks, with clear space around the five base anchors. Influence tint blends over the generated colors so ownership and terrain remain readable together.
+The adapter samples a 1.2 km × 1.2 km generated region into the existing 100 × 100 game-unit battlefield: one game unit represents 12 metres. Terrain elevation and slopes drive shaded terrain colors; the playable surface remains flat. River/lake and road/street layers are baked into those colors. Parcel footprints become bounded cuboid buildings with primitive roofs; trees and rocks use shared Bevy primitive meshes/materials. Scenery is capped at 400 buildings, 260 trees, and 28 rocks, with clear space around the five base anchors. Influence tint blends over the generated colors so ownership and terrain remain readable together.
 
 This is a visual map upgrade. Scenery has no collision, pathfinding, combat, gathering, vision, or healing authority: minions can cross water and buildings. Base positions, elemental conservation, combat values, and gathering rules remain the same. A selected numeric seed also seeds the match.
 

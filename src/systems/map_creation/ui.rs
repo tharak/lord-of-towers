@@ -1,7 +1,7 @@
 use crate::components::{ControlBar, HudRoot, MapSetupAction, MapSetupRoot, MapSetupText};
 use crate::resources::MapCreation;
 use crate::types::{
-    map_settings::*,
+    map_settings::{MapClimate, MapDensity, MapPreset, MapRelief, MapRoads, MapWater},
     map_ui::{MapPhase, MapTextRole},
 };
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};

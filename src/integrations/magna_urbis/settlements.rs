@@ -83,15 +83,22 @@ pub(super) fn generate(
         })
         .collect();
     // The five bases remain the game's anchors, even on terrain-only maps.
-    road_sites.extend(base_positions(request.half_extent).iter().enumerate().map(
-        |(i, &position)| RoadSite {
+    for (i, position) in base_positions(request.half_extent).into_iter().enumerate() {
+        let center = to_point(position);
+        if road_sites
+            .iter()
+            .any(|site| (site.center.x - center.x).hypot(site.center.y - center.y) < 1.0)
+        {
+            continue;
+        }
+        road_sites.push(RoadSite {
             key: format!("base-{i}"),
             population: 300,
             culture: "medieval".into(),
-            center: to_point(position),
+            center,
             radius: 35.0,
-        },
-    ));
+        });
+    }
     let mut strokes = Vec::new();
     let mut regional = Vec::new();
     if settings.roads != MapRoads::None {

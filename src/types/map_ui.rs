@@ -18,3 +18,11 @@ pub(crate) enum MapTextRole {
     Status,
     Launcher,
 }
+
+/// A touch is a button tap only if it never crosses the scroll threshold.
+pub(crate) struct MapTouchPress {
+    pub entity: bevy::prelude::Entity,
+    pub touch: u64,
+    pub start: bevy::prelude::Vec2,
+    pub moved: bool,
+}

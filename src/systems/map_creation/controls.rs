@@ -1,6 +1,9 @@
 use crate::components::MapSetupAction;
 use crate::resources::{MapCreation, MapLandscape, MatchState, SimulationConfig};
-use crate::types::{map_settings::*, map_ui::MapPhase};
+use crate::types::{
+    map_settings::{MapClimate, MapDensity, MapPreset, MapRelief, MapRoads, MapWater},
+    map_ui::{MapPhase, MapTouchPress},
+};
 use bevy::prelude::*;
 fn density(value: MapDensity) -> MapDensity {
     match value {
@@ -10,16 +13,55 @@ fn density(value: MapDensity) -> MapDensity {
     }
 }
 pub(crate) fn map_actions(
-    buttons: Query<(Ref<Interaction>, &MapSetupAction)>,
+    buttons: Query<(Entity, Ref<Interaction>, &MapSetupAction)>,
+    touches: Res<Touches>,
+    mut press: Local<Option<MapTouchPress>>,
     mut map: ResMut<MapCreation>,
     landscape: Res<MapLandscape>,
     mut state: ResMut<MatchState>,
     mut config: ResMut<SimulationConfig>,
 ) {
-    for (interaction, action) in &buttons {
-        if !interaction.is_changed() || *interaction != Interaction::Pressed {
-            continue;
+    let mut actions = Vec::new();
+    if touches.iter().count() > 1 || touches.iter_just_canceled().next().is_some() {
+        *press = None;
+    } else {
+        if let Some(held) = press.as_mut() {
+            if let Some(touch) = touches.get_pressed(held.touch) {
+                held.moved |= touch.position().distance(held.start) > 8.0;
+            }
         }
+        for (entity, interaction, action) in &buttons {
+            if !interaction.is_changed() || *interaction != Interaction::Pressed {
+                continue;
+            }
+            if let Some(touch) = touches.iter().next() {
+                if press.is_none() {
+                    *press = Some(MapTouchPress {
+                        entity,
+                        touch: touch.id(),
+                        start: touch.start_position(),
+                        moved: false,
+                    });
+                }
+            } else if !touches.any_just_released() {
+                actions.push(*action);
+            }
+        }
+        if let Some(held) = press.as_ref() {
+            if let Some(touch) = touches
+                .iter_just_released()
+                .find(|touch| touch.id() == held.touch)
+            {
+                if !held.moved && touch.position().distance(held.start) <= 8.0 {
+                    if let Ok((_, _, action)) = buttons.get(held.entity) {
+                        actions.push(*action);
+                    }
+                }
+                *press = None;
+            }
+        }
+    }
+    for action in actions {
         if matches!(action, MapSetupAction::TogglePanel) {
             map.show_settings = !map.show_settings;
             continue;
@@ -28,6 +70,7 @@ pub(crate) fn map_actions(
             if map.phase == MapPhase::Playing {
                 map.phase = MapPhase::Configuring;
                 map.message = "Choose settings for a new match.".into();
+                state.map_ready = false;
                 state.restart_requested = true;
             }
             map.show_settings = !map.show_settings || map.phase == MapPhase::Configuring;
@@ -47,6 +90,7 @@ pub(crate) fn map_actions(
                     config.seed = map.settings.seed;
                     map.phase = MapPhase::Playing;
                     map.show_settings = false;
+                    state.map_ready = true;
                     state.restart_requested = true;
                 }
             }

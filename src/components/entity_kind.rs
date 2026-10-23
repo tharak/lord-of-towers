@@ -18,6 +18,7 @@ pub enum EntityKind {
     ProductionIndicator,
     Battlefield,
     MapDecoration,
+    VisionObstacle,
     Camera,
     Light,
     Ui,

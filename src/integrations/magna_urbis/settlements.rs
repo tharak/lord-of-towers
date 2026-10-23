@@ -168,7 +168,8 @@ pub(super) fn generate(
     let per_site = 400 / partitions.len().max(1);
     for partition in partitions {
         let mut count = 0;
-        for parcel in partition.parcels {
+        let stride = partition.parcels.len().div_ceil(per_site.max(1)).max(1);
+        for parcel in partition.parcels.into_iter().step_by(stride) {
             if count >= per_site {
                 break;
             }

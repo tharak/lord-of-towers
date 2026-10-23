@@ -53,3 +53,6 @@ pub(crate) use map_landscape::MapLandscape;
 
 pub mod map_visual_assets;
 pub(crate) use map_visual_assets::MapVisualAssets;
+
+pub mod vision_occlusion;
+pub(crate) use vision_occlusion::VisionOcclusion;

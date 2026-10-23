@@ -2,7 +2,7 @@ use crate::components::{
     Allegiance, DragControl, ElementDeposit, ElementInventory, EquipmentOrder, EquippedElements,
     GatheringState, Minion, Position, TrailEmitter, Vision,
 };
-use crate::resources::SimulationConfig;
+use crate::resources::{SimulationConfig, VisionOcclusion};
 use crate::systems::gathering::navigation::{nearest_tower, stable};
 use crate::systems::gathering::trails::{allocate_trip, carrier_marker};
 use crate::types::TowerOrderAction;
@@ -33,7 +33,8 @@ pub(crate) fn collect(world: &mut World) {
             .iter(world)
             .filter_map(|(e, p, a, v)| {
                 let d = p.0.distance_squared(position.0);
-                (a.is_empty() && d <= radius * radius && d <= v.radius * v.radius).then_some((e, d))
+                (a.is_empty() && d <= radius * radius && d <= v.radius * v.radius
+                    && world.resource::<VisionOcclusion>().has_line_of_sight(p.0, position.0)).then_some((e, d))
             })
             .collect();
         candidates.sort_by(|a, b| {

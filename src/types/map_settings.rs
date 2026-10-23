@@ -50,37 +50,37 @@ pub struct MapSettings {
 }
 impl Default for MapSettings {
     fn default() -> Self {
-        Self {
-            seed: 42,
-            preset: MapPreset::Landscape,
+        Self::preset(MapPreset::Town, 42)
+    }
+}
+impl MapSettings {
+    fn preset(preset: MapPreset, seed: u64) -> Self {
+        let mut settings = Self {
+            seed,
+            preset,
             relief: MapRelief::Hills,
             water: MapWater::RiversAndLakes,
             vegetation: MapDensity::Sparse,
             settlements: MapDensity::Sparse,
             roads: MapRoads::Streets,
             climate: MapClimate::Temperate,
-        }
-    }
-}
-impl MapSettings {
-    pub fn apply_preset(&mut self, preset: MapPreset) {
-        let seed = self.seed;
-        *self = Self::default();
-        self.seed = seed;
-        self.preset = preset;
+        };
         match preset {
             MapPreset::Landscape => {}
             MapPreset::Town => {
-                self.relief = MapRelief::Plains;
-                self.water = MapWater::Rivers;
-                self.vegetation = MapDensity::Sparse;
-                self.settlements = MapDensity::Dense;
+                settings.relief = MapRelief::Plains;
+                settings.water = MapWater::Rivers;
+                settings.settlements = MapDensity::Dense;
             }
             MapPreset::Terrain => {
-                self.settlements = MapDensity::None;
-                self.roads = MapRoads::None;
+                settings.settlements = MapDensity::None;
+                settings.roads = MapRoads::None;
             }
         }
+        settings
+    }
+    pub fn apply_preset(&mut self, preset: MapPreset) {
+        *self = Self::preset(preset, self.seed);
     }
 }
 #[derive(Clone, Copy, Debug)]

@@ -19,3 +19,5 @@ pub mod trail;
 pub mod ui;
 
 pub mod map_scene;
+
+pub mod map_vision;

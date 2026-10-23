@@ -3,3 +3,5 @@ pub mod controls;
 pub mod generation;
 pub mod scenery;
 pub mod ui;
+
+pub mod vision;

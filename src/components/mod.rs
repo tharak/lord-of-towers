@@ -120,3 +120,8 @@ pub(crate) use map_setup_action::MapSetupAction;
 pub(crate) use map_setup_root::MapSetupRoot;
 pub(crate) use map_setup_text::MapSetupText;
 pub(crate) use map_startup_root::MapStartupRoot;
+
+pub mod map_vision_root;
+pub mod vision_blocker;
+pub(crate) use map_vision_root::MapVisionRoot;
+pub(crate) use vision_blocker::VisionBlocker;

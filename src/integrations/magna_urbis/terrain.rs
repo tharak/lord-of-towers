@@ -1,7 +1,7 @@
 //! Converts our terrain options into upstream calls; retains no rendering handles.
 use crate::types::map_settings::{MapRelief, MapSettings, MapWater};
 use magna_urbis_core::{HydrologyConfig, HydrologyEngine, TerrainGenerator};
-pub(super) const WIDTH: f64 = 2400.0;
+pub(super) const WIDTH: f64 = 1200.0;
 pub(super) const RESOLUTION: usize = 96;
 pub(super) struct Surface {
     pub height: Vec<f32>,

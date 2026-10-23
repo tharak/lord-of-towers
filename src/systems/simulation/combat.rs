@@ -8,7 +8,6 @@ use crate::resources::{
     MatchState, PendingDamage, PendingTowerAlerts, SimulationConfig, SpatialIndex,
 };
 use crate::scheduling::simulation_delta;
-use crate::systems::gathering::navigation::units;
 use crate::types::TowerAlert;
 use bevy::prelude::*;
 
@@ -114,7 +113,7 @@ pub(crate) fn collect_damage(
             spawn_projectile(
                 &mut commands,
                 position.0,
-                *faction,
+                Allegiance(faction.0),
                 Projectile {
                     target: target.entity,
                     damage: attack.damage,

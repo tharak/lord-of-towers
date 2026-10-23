@@ -2,7 +2,6 @@ use crate::components::{
     Allegiance, ElementInventory, Faction, FactionText, Minion, StatusText, Tower,
 };
 use crate::resources::{InfluenceField, MatchState};
-use crate::systems::gathering::navigation::units;
 use crate::types::FACTION_NAMES;
 use bevy::prelude::*;
 

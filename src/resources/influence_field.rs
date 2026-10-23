@@ -1,4 +1,4 @@
-use crate::systems::influence::territory::controller;
+use crate::types::territory::controller;
 use crate::types::{INTERVAL, SIDE};
 use bevy::prelude::*;
 

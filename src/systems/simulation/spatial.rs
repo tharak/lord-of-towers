@@ -1,6 +1,5 @@
 use crate::components::{Allegiance, Health, Minion, Position, SimulationId, Tower};
 use crate::resources::SpatialIndex;
-use crate::systems::gathering::navigation::units;
 use crate::types::Neighbor;
 use bevy::prelude::*;
 

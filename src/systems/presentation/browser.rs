@@ -1,45 +1,11 @@
 #[cfg(target_arch = "wasm32")]
-use crate::components::Control;
+use crate::components::{
+    Control, DonutVisual, ElementDeposit, ElementInventory, EntityKind, EquippedElementVisual,
+    InfluenceEmitter, Minion, PlayerControlled, Projectile, SpectatorCamera, StackPiece, Tower,
+    TowerBeacon, TowerInfluenceVisual, Trail,
+};
 #[cfg(target_arch = "wasm32")]
-use crate::components::DonutVisual;
-#[cfg(target_arch = "wasm32")]
-use crate::components::ElementDeposit;
-#[cfg(target_arch = "wasm32")]
-use crate::components::ElementInventory;
-#[cfg(target_arch = "wasm32")]
-use crate::components::EntityKind;
-#[cfg(target_arch = "wasm32")]
-use crate::components::EquippedElementVisual;
-#[cfg(target_arch = "wasm32")]
-use crate::components::InfluenceEmitter;
-#[cfg(target_arch = "wasm32")]
-use crate::components::Minion;
-#[cfg(target_arch = "wasm32")]
-use crate::components::PlayerControlled;
-#[cfg(target_arch = "wasm32")]
-use crate::components::Projectile;
-#[cfg(target_arch = "wasm32")]
-use crate::components::SpectatorCamera;
-#[cfg(target_arch = "wasm32")]
-use crate::components::StackPiece;
-#[cfg(target_arch = "wasm32")]
-use crate::components::Tower;
-#[cfg(target_arch = "wasm32")]
-use crate::components::TowerBeacon;
-#[cfg(target_arch = "wasm32")]
-use crate::components::TowerInfluenceVisual;
-#[cfg(target_arch = "wasm32")]
-use crate::components::Trail;
-#[cfg(target_arch = "wasm32")]
-use crate::resources::ElementEconomy;
-#[cfg(target_arch = "wasm32")]
-use crate::resources::HudVisibility;
-#[cfg(target_arch = "wasm32")]
-use crate::resources::InspectorState;
-#[cfg(target_arch = "wasm32")]
-use crate::resources::MatchState;
-#[cfg(target_arch = "wasm32")]
-use crate::systems::inspector::controls::controls;
+use crate::resources::{ElementEconomy, HudVisibility, InspectorState, MatchState};
 #[cfg(target_arch = "wasm32")]
 use crate::systems::presentation::layout::mobile_layout;
 #[cfg(target_arch = "wasm32")]

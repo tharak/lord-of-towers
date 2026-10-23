@@ -9,6 +9,7 @@ pub mod neighbor;
 pub mod player_command;
 pub mod pointer_press;
 pub mod row;
+pub mod territory;
 pub mod tower_alert;
 pub mod tower_order_action;
 

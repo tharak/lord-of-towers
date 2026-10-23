@@ -1,5 +1,4 @@
 //! ECS component data; behavior lives in systems.
-use crate::systems::gathering::navigation::units;
 use crate::types::Element;
 use bevy::prelude::*;
 use std::collections::VecDeque;

@@ -1,7 +1,7 @@
 //! UI orchestration depends on our adapter entry point, never on upstream APIs.
 use crate::{
     integrations::magna_urbis,
-    resources::{MapCreation, MapGeneration, MapLandscape, SimulationConfig},
+    resources::{MapCreation, MapGeneration, MapLandscape, MatchState, SimulationConfig},
     types::{map_settings::MapGenerationRequest, map_ui::MapPhase},
 };
 use bevy::{
@@ -12,7 +12,8 @@ pub(crate) fn generate_preview(
     mut map: ResMut<MapCreation>,
     mut generation: ResMut<MapGeneration>,
     mut landscape: ResMut<MapLandscape>,
-    config: Res<SimulationConfig>,
+    mut config: ResMut<SimulationConfig>,
+    mut state: ResMut<MatchState>,
 ) {
     if map.phase != MapPhase::Generating {
         return;
@@ -27,8 +28,14 @@ pub(crate) fn generate_preview(
             settings: map.settings,
             half_extent: config.half_extent,
         };
-        generation.0 =
-            Some(AsyncComputeTaskPool::get().spawn(async move { magna_urbis::generate(request) }));
+        let automatic = !map.options_enabled;
+        generation.0 = Some(AsyncComputeTaskPool::get().spawn(async move {
+            if automatic {
+                magna_urbis::generate_default(request)
+            } else {
+                magna_urbis::generate(request)
+            }
+        }));
     }
     let Some(task) = generation.0.as_mut() else {
         return;
@@ -42,12 +49,24 @@ pub(crate) fn generate_preview(
             map.message = data.summary.clone();
             landscape.data = Some(data);
             landscape.revision = landscape.revision.wrapping_add(1);
-            map.phase = MapPhase::Ready;
+            if map.options_enabled {
+                map.phase = MapPhase::Ready;
+            } else {
+                config.seed = map.settings.seed;
+                map.phase = MapPhase::Playing;
+                state.map_ready = true;
+                state.restart_requested = true;
+            }
         }
         Err(error) => {
-            map.message = format!(
-                "Could not generate this map: {error}. Change the seed or settings and try again."
-            );
+            warn!("Map generation failed: {error}");
+            map.message = if map.options_enabled {
+                format!(
+                    "Could not generate this map: {error}. Change the seed or settings and try again."
+                )
+            } else {
+                "The battlefield could not be prepared. Retry to try again.".into()
+            };
             map.phase = MapPhase::Configuring;
         }
     }

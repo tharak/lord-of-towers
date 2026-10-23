@@ -62,6 +62,9 @@ pub(crate) fn map_actions(
         }
     }
     for action in actions {
+        if !map.options_enabled && !matches!(action, MapSetupAction::Generate) {
+            continue;
+        }
         if matches!(action, MapSetupAction::TogglePanel) {
             map.show_settings = !map.show_settings;
             continue;

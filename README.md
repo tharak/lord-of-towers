@@ -8,7 +8,7 @@ A Rust + Bevy ECS strategy simulation built entirely from Bevy primitive meshes.
 
 ## Playing
 
-First create a map: choose Landscape + villages, Medieval town, or Terrain only, then customize relief, rivers/lakes, vegetation, settlements, roads/streets, climate, and seed. Generate a preview, hide settings to inspect it, then Start match. New map returns to creation; Restart keeps the current map. Terrain and scenery are decorative and preserve existing movement and combat. Maps use the pinned [Magna Urbis](https://github.com/dunkean/magna-urbis) Rust generator through a dedicated adapter; see [map generation](docs/map-generation.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
+The game automatically generates the default landscape (seed 42) and starts the match. Map options and their launcher are temporarily hidden. Restart keeps the current map. Terrain and scenery are decorative and preserve existing movement and combat. Maps use the pinned [Magna Urbis](https://github.com/dunkean/magna-urbis) Rust generator through a dedicated adapter; see [map generation](docs/map-generation.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Five towers begin with three empty-equipped minions each. You control Orthanc's orange faction. Minions gather finite elements and fight visible enemies. Towers are destroyed at zero health and drop their stock; the last surviving tower wins.
 

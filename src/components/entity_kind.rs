@@ -17,6 +17,7 @@ pub enum EntityKind {
     EquipmentOrder,
     ProductionIndicator,
     Battlefield,
+    MapDecoration,
     Camera,
     Light,
     Ui,

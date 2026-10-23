@@ -13,11 +13,15 @@ use bevy::prelude::*;
 
 pub(crate) fn setup_match(
     mut commands: Commands,
+    state: Res<MatchState>,
     config: Res<SimulationConfig>,
     mut factions: ResMut<FactionEntities>,
     mut random: ResMut<RandomStream>,
     mut sequence: ResMut<SpawnSequence>,
 ) {
+    if !state.map_ready {
+        return;
+    }
     sequence.0 = 5;
     create_match(
         &mut commands,
@@ -80,8 +84,10 @@ pub(crate) fn restart_match(
         commands.entity(entity).despawn();
     }
     let hidden = state.browser_hidden;
+    let map_ready = state.map_ready;
     *state = MatchState {
         browser_hidden: hidden,
+        map_ready,
         ..default()
     };
     spatial.0.clear();
@@ -93,6 +99,9 @@ pub(crate) fn restart_match(
     *trails = TrailIds::default();
     if let Some(mut field) = field {
         field.clear();
+    }
+    if !map_ready {
+        return;
     }
     create_match(
         &mut commands,

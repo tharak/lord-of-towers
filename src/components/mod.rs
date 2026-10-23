@@ -107,3 +107,14 @@ pub use trail::Trail;
 pub use trail_emitter::TrailEmitter;
 pub use vision::Vision;
 pub(crate) use visited_trail_markers::VisitedTrailMarkers;
+
+pub mod map_decoration;
+pub mod map_scene;
+pub mod map_setup_action;
+pub mod map_setup_root;
+pub mod map_setup_text;
+pub(crate) use map_decoration::MapDecoration;
+pub(crate) use map_scene::MapScene;
+pub(crate) use map_setup_action::MapSetupAction;
+pub(crate) use map_setup_root::MapSetupRoot;
+pub(crate) use map_setup_text::MapSetupText;

@@ -1,15 +1,16 @@
-use crate::resources::{InfluenceField, VisualAssets};
+use crate::resources::{InfluenceField, MapLandscape, VisualAssets};
 use crate::types::faction_color;
 use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 
 pub(crate) fn ground_colors(
     field: Res<InfluenceField>,
+    landscape: Res<MapLandscape>,
     assets: Res<VisualAssets>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut revision: Local<Option<u64>>,
+    mut revision: Local<Option<(u64, u64)>>,
 ) {
-    if *revision == Some(field.revision) {
+    if *revision == Some((field.revision, landscape.revision)) {
         return;
     }
     let Some(mut mesh) = meshes.get_mut(&assets.ground) else {
@@ -30,14 +31,22 @@ pub(crate) fn ground_colors(
             let blend = ((strength - ordered[1].1) / strength.max(0.01)).clamp(0.0, 1.0)
                 * (strength * 0.5).clamp(0.0, 0.65);
             let c = faction_color(winner).to_linear();
+            let base = landscape.data.as_ref().map_or([0.07, 0.09, 0.11], |data| {
+                data.color_at(Vec2::new(p[0], p[2]))
+            });
+            let blend = if landscape.data.is_some() {
+                blend * 0.45
+            } else {
+                blend
+            };
             [
-                0.07 + (c.red - 0.07) * blend,
-                0.09 + (c.green - 0.09) * blend,
-                0.11 + (c.blue - 0.11) * blend,
+                base[0] + (c.red - base[0]) * blend,
+                base[1] + (c.green - base[1]) * blend,
+                base[2] + (c.blue - base[2]) * blend,
                 1.0,
             ]
         })
         .collect();
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-    *revision = Some(field.revision);
+    *revision = Some((field.revision, landscape.revision));
 }

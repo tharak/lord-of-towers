@@ -16,6 +16,8 @@ package_dir="dist/pkg/${BUILD_COMMIT}"
 mkdir -p "$package_dir"
 wasm-bindgen --target web --out-dir "$package_dir" --out-name lord_of_towers target/wasm32-unknown-unknown/release/lord-of-towers.wasm
 cp web/index.html dist/index.html
+cp THIRD_PARTY_NOTICES.md dist/THIRD_PARTY_NOTICES.md
+cp third_party/magna-urbis/LICENSE dist/MAGNA_URBIS_LICENSE.txt
 python3 - <<'PY'
 import os
 from pathlib import Path

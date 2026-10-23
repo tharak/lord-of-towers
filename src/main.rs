@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use lord_of_towers::plugins::{
-    EquipmentPlugin, GatheringPlugin, InfluencePlugin, InspectorPlugin, PlayerInteractionPlugin,
-    PresentationPlugin, SimulationPlugin,
+    EquipmentPlugin, GatheringPlugin, InfluencePlugin, InspectorPlugin, MapCreationPlugin,
+    PlayerInteractionPlugin, PresentationPlugin, SimulationPlugin,
 };
 
 fn main() {
@@ -37,6 +37,7 @@ fn main() {
             InfluencePlugin,
             InspectorPlugin,
             PresentationPlugin,
+            MapCreationPlugin,
         ))
         .run();
 }

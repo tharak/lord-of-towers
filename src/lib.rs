@@ -18,3 +18,5 @@ pub mod resources;
 pub mod scheduling;
 pub mod systems;
 pub mod types;
+
+mod integrations;

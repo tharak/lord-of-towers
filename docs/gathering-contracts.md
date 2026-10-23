@@ -9,3 +9,6 @@ Active held/released DragControl suspends gathering navigation, pickups and deli
 Only carriers create trails. At pickup and every two traveled world units, a carrier refreshes the nearest live friendly marker within `trail_spacing` (2), or creates one when none is nearby. Refresh resets lifetime to 30 simulation seconds without changing position, trip, sequence or visited memories. `TrailIds` allocates carrier trips. Decay uses simulation time, stops while paused, and scales with speed. Player drawing/erasing no longer exists.
 
 NPC production consumes the oldest five stock units after nearby empty equipment slots are filled. Player production consumes a selected five-unit recipe. Both update consumed counts and newborn birth stats. Tower influence radius remains fixed at 15. See [equipment contracts](equipment-contracts.md) for reservations, transfers and conservation.
+
+
+Deposit discovery, pickup eligibility and trail perception require a clear line of sight through the map’s building/tree footprints in addition to the existing vision and distance limits. Hidden trail markers are not marked visited by selection. Friendly delivery tower locations remain globally known. Trail emission/refresh and cargo delivery remain physical proximity rules.

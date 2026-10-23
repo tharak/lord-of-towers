@@ -8,7 +8,7 @@ A Rust + Bevy ECS strategy simulation built entirely from Bevy primitive meshes.
 
 ## Playing
 
-The game automatically generates the default landscape (seed 42) and starts the match. Map options and their launcher are temporarily hidden. Restart keeps the current map. Terrain and scenery are decorative and preserve existing movement and combat. Maps use the pinned [Magna Urbis](https://github.com/dunkean/magna-urbis) Rust generator through a dedicated adapter; see [map generation](docs/map-generation.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
+The game automatically generates the default medieval city (seed 42) and starts the match. Map options and their launcher are temporarily hidden. Restart keeps the current map. Buildings and tree canopies block minion sight. Terrain and scenery remain passable. Maps use the pinned [Magna Urbis](https://github.com/dunkean/magna-urbis) Rust generator through a dedicated adapter; see [map generation](docs/map-generation.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Five towers begin with three empty-equipped minions each. You control Orthanc's orange faction. Minions gather finite elements and fight visible enemies. Towers are destroyed at zero health and drop their stock; the last surviving tower wins.
 
@@ -36,7 +36,7 @@ Starting and newborn minions have empty slots: damage **10**, speed **4**, maxim
 
 Inside any living friendly tower’s influence circle (radius 15 by default), minions recover 1 HP per simulation second per permanent Earth point: starting minions heal 2 HP/s, and each Earth unit in a birth recipe adds 1 HP/s. Equipped Earth changes maximum health but does not change this healing rate. Healing continues during combat and dragging, stops at maximum health, and does not stack across overlapping friendly circles. Enemy bases and territory influence from minions grant no healing. Damage and destruction resolve before healing; dead units cannot be revived. Healing stops while paused, hidden or after victory and scales with simulation speed.
 
-Outside player dragging, minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Only friendly delivery tower locations are globally known; there is no shared faction vision.
+Outside player dragging, minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Buildings and tree canopies occlude enemies, deposits and trail markers within vision range. Minions recheck line of sight before firing and stop pursuing enemies when sight is lost. Only friendly delivery tower locations are globally known; there is no shared faction vision.
 
 At pickup and every two traveled units, carriers refresh the nearest friendly trail within two units or place a new marker. Markers last 30 simulation seconds. Choosing a marker marks every other visible friendly marker visited for that minion; arrival marks the chosen marker visited. Decay stops while paused and scales with simulation speed.
 

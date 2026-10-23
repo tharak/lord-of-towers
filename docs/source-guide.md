@@ -10,6 +10,8 @@ The code follows Bevy ECS: components describe individual entities, resources ho
 | Starting health, speed, tower radius, or world configuration | [SimulationConfig](../src/resources/simulation_config.rs) |
 | Components placed on a newborn minion | [Minion construction](../src/entities/minion.rs) |
 | Base healing eligibility or rate | [Healing system](../src/systems/simulation/healing.rs) |
+| Building/tree sight shapes | [VisionBlocker component](../src/components/vision_blocker.rs) |
+| Occlusion geometry and spatial queries | [VisionOcclusion resource](../src/resources/vision_occlusion.rs) |
 | Shooting, projectiles, damage, and death | [Combat systems](../src/systems/simulation/combat.rs) |
 | Movement, dragging, or enemy selection | [Simulation systems](../src/systems/simulation/mod.rs) |
 | Equipment commands, reservations, or attribute bonuses | [Equipment systems](../src/systems/equipment/mod.rs) |
@@ -40,6 +42,6 @@ Each folder's `mod.rs` is a navigation index; scheduling also contains the small
 
 `model.rs` re-exports the original shared API, so `model::Health` and similar imports still work. The old subsystem modules likewise preserve public plugin and helper imports. They contain no gameplay implementation; new code should use the dedicated modules.
 
-This reorganization preserves gameplay values, fixed-step ordering, deterministic IDs and random sequences, deferred command timing, parent-child relationships, restart behavior, and native/WebAssembly target conditions. Minions retain 90 base life, faction-color fading, and 1 HP per simulation second per permanent Earth point inside a living friendly tower circle.
+This reorganization preserves gameplay values, fixed-step ordering, deterministic IDs and random sequences, deferred command timing, parent-child relationships, restart behavior, and native/WebAssembly target conditions. Minions retain 90 base life, faction-color fading, and 1 HP per simulation second per permanent Earth point inside a living friendly tower circle. Building/tree sight blockers are independent ECS geometry; see the map-generation guide for their lifecycle and perception rules.
 
 Validation remains compilation only: GitHub Actions runs native `cargo check --locked` and a release WebAssembly build. Formatting is allowed. Do not add or run automated tests, browser suites, extended simulations, or runtime smoke checks. Local compilation requires an explicit user request.

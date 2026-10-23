@@ -19,7 +19,7 @@ pub const FACTION_RGB: [[u8; 3]; 5] = [
 pub const ELEMENTS_PER_MINION: usize = 5;
 pub const ELEMENT_BONUS_PERCENT: f32 = 30.0;
 pub const VOID_BONUS_PERCENT: f32 = 10.0;
-pub(crate) const KINDS: [EntityKind; 18] = [
+pub(crate) const KINDS: [EntityKind; 19] = [
     EntityKind::Faction,
     EntityKind::Tower,
     EntityKind::Minion,
@@ -35,6 +35,7 @@ pub(crate) const KINDS: [EntityKind; 18] = [
     EntityKind::ProductionIndicator,
     EntityKind::Battlefield,
     EntityKind::MapDecoration,
+    EntityKind::VisionObstacle,
     EntityKind::Camera,
     EntityKind::Light,
     EntityKind::Ui,

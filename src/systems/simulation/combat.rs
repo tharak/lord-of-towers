@@ -5,7 +5,7 @@ use crate::components::{
 use crate::entities::element_deposit::drop_cargo;
 use crate::entities::projectile::spawn_projectile;
 use crate::resources::{
-    MatchState, PendingDamage, PendingTowerAlerts, SimulationConfig, SpatialIndex,
+    MatchState, PendingDamage, PendingTowerAlerts, SimulationConfig, SpatialIndex, VisionOcclusion,
 };
 use crate::scheduling::simulation_delta;
 use crate::types::TowerAlert;
@@ -54,6 +54,7 @@ pub(crate) fn collect_damage(
     time: Res<Time<Fixed>>,
     state: Res<MatchState>,
     spatial: Res<SpatialIndex>,
+    occlusion: Res<VisionOcclusion>,
     factions: Query<&Faction>,
     live_targets: Query<(&Position, &Allegiance, Option<&Health>), Or<(With<Tower>, With<Minion>)>>,
     mut attackers: Query<
@@ -99,6 +100,7 @@ pub(crate) fn collect_damage(
             let distance = position.0.distance(live_position.0);
             if live_owner.0 == faction.0
                 || health.is_some_and(|health| health.current <= 0.0)
+                || !occlusion.has_line_of_sight(position.0, live_position.0)
                 || distance > vision.radius.max(0.0)
                 || distance > attack.range + if target.tower { 2.0 } else { 0.0 }
             {

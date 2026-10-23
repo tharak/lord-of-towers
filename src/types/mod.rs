@@ -37,3 +37,6 @@ pub use tower_order_action::TowerOrderAction;
 pub mod map_data;
 pub mod map_settings;
 pub mod map_ui;
+
+pub mod vision_blocker_shape;
+pub(crate) use vision_blocker_shape::VisionBlockerShape;

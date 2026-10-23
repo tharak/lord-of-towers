@@ -9,3 +9,5 @@ pub mod production;
 pub mod spatial;
 pub mod targeting;
 pub mod victory;
+
+pub mod vision;

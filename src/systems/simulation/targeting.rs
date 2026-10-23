@@ -2,13 +2,14 @@ use crate::components::{
     Allegiance, Attack, CombatTarget, DragControl, ElementInventory, EquipmentOrder, Health,
     InfluenceEmitter, Minion, Movement, Position, SimulationId, Tower, TowerDefenseTarget, Vision,
 };
-use crate::resources::{PendingTowerAlerts, SpatialIndex};
+use crate::resources::{PendingTowerAlerts, SpatialIndex, VisionOcclusion};
 use bevy::prelude::*;
 
 /// Defense can chase visible attackers; delivery orders otherwise only shoot in range.
 pub(crate) fn select_combat_targets(
     mut commands: Commands,
     spatial: Res<SpatialIndex>,
+    occlusion: Res<VisionOcclusion>,
     orders: Query<&EquipmentOrder>,
     towers: Query<(&Health, &Allegiance), With<Tower>>,
     mut minions: Query<
@@ -34,7 +35,11 @@ pub(crate) fn select_combat_targets(
         let visible = |target: Entity| {
             spatial
                 .nearby(position.0, vision.radius.max(0.0))
-                .find(|entry| entry.entity == target && entry.faction != owner.0)
+                .find(|entry| {
+                    entry.entity == target
+                        && entry.faction != owner.0
+                        && occlusion.has_line_of_sight(position.0, entry.position)
+                })
         };
         let defense_target = defense.and_then(|defense| {
             towers
@@ -51,7 +56,10 @@ pub(crate) fn select_combat_targets(
         let target = defense_target.or_else(|| {
             spatial
                 .nearby(position.0, vision.radius.max(0.0))
-                .filter(|entry| entry.faction != owner.0)
+                .filter(|entry| {
+                    entry.faction != owner.0
+                        && occlusion.has_line_of_sight(position.0, entry.position)
+                })
                 .filter(|entry| {
                     (!carrying && !ordered)
                         || position.0.distance(entry.position)
@@ -84,6 +92,7 @@ pub(crate) fn select_combat_targets(
 pub(crate) fn process_tower_alerts(
     mut commands: Commands,
     mut alerts: ResMut<PendingTowerAlerts>,
+    occlusion: Res<VisionOcclusion>,
     towers: Query<(&Position, &Allegiance, &InfluenceEmitter, &Health), With<Tower>>,
     targets: Query<
         (&Position, &Allegiance, &Health, Option<&SimulationId>),
@@ -111,7 +120,8 @@ pub(crate) fn process_tower_alerts(
                 && tower_health.current > 0.0
                 && attacker_owner != owner
                 && health.current > 0.0
-                && distance <= vision.radius.max(0.0).powi(2))
+                && distance <= vision.radius.max(0.0).powi(2)
+                && occlusion.has_line_of_sight(position.0, attacker_position.0))
             .then_some((
                 defense,
                 distance,

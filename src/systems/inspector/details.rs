@@ -1,7 +1,7 @@
 use crate::components::{
     Allegiance, ArmState, Attack, DragControl, ElementInventory, ElementStats, EntityKind,
     EquipmentOrder, EquippedElements, Faction, GatheringState, Health, InfluenceEmitter,
-    InspectorRoot, InspectorText, LegState, Movement, Projectile, Trail, Vision,
+    InspectorRoot, InspectorText, LegState, Movement, Projectile, Trail, Vision, VisionBlocker,
 };
 use crate::resources::{InspectorFilter, InspectorState};
 use crate::systems::inspector::filtering::matching_entities;
@@ -60,6 +60,13 @@ pub(crate) fn append_gameplay_details(text: &mut String, entity: &EntityRef) {
     }
     if let Some(vision) = entity.get::<Vision>() {
         let _ = writeln!(text, "Vision: {:.1}", vision.radius);
+    }
+    if let Some(blocker) = entity.get::<VisionBlocker>() {
+        let _ = writeln!(
+            text,
+            "Sight blocker: {:?} | half extents ({:.2}, {:.2}) | angle {:.2}",
+            blocker.shape, blocker.half_extents.x, blocker.half_extents.y, blocker.angle
+        );
     }
     if let Some(state) = entity.get::<LegState>() {
         let _ = writeln!(text, "Leg animation state: {state:?}");

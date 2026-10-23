@@ -2,7 +2,7 @@ use crate::components::{
     Allegiance, DragControl, ElementDeposit, ElementInventory, GatheringState, Minion, Movement,
     Position, SimulationId, Tower, Trail, Vision, VisitedTrailMarkers,
 };
-use crate::resources::{GatheringRuntime, MatchState, SimulationConfig};
+use crate::resources::{GatheringRuntime, MatchState, SimulationConfig, VisionOcclusion};
 use crate::scheduling::simulation_delta;
 use bevy::prelude::*;
 
@@ -96,7 +96,12 @@ pub(crate) fn navigate(world: &mut World) {
             .iter(world)
             .filter_map(|(e, p, a)| {
                 let d = position.0.distance_squared(p.0);
-                (d <= vision.radius * vision.radius && !a.is_empty()).then_some((e, p.0, d))
+                (d <= vision.radius * vision.radius
+                    && !a.is_empty()
+                    && world
+                        .resource::<VisionOcclusion>()
+                        .has_line_of_sight(position.0, p.0))
+                .then_some((e, p.0, d))
             })
             .collect();
         deposits.sort_by(|a, b| {
@@ -116,8 +121,13 @@ pub(crate) fn navigate(world: &mut World) {
             .iter(world)
             .filter_map(|(e, p, a, t)| {
                 let d = position.0.distance_squared(p.0);
-                (a.0 == owner.0 && t.remaining > 0.0 && d <= vision.radius * vision.radius)
-                    .then_some((e, p.0, *t, d))
+                (a.0 == owner.0
+                    && t.remaining > 0.0
+                    && d <= vision.radius * vision.radius
+                    && world
+                        .resource::<VisionOcclusion>()
+                        .has_line_of_sight(position.0, p.0))
+                .then_some((e, p.0, *t, d))
             })
             .collect();
         let visible_markers: Vec<_> = trails.iter().map(|(marker, ..)| *marker).collect();

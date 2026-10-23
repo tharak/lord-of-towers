@@ -8,6 +8,7 @@ use crate::{
             generation::generate_preview,
             scenery::{setup_map_assets, update_map_scene},
             ui::{scroll_map_settings, update_map_ui},
+            vision::install_map_vision,
         },
         presentation::{
             controls::{button_controls, sync_control_state},
@@ -29,6 +30,7 @@ impl Plugin for MapCreationPlugin {
                 (
                     map_actions,
                     generate_preview,
+                    install_map_vision,
                     update_map_scene,
                     update_map_ui,
                     scroll_map_settings,

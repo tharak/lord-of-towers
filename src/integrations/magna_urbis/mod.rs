@@ -5,17 +5,28 @@ mod settlements;
 mod terrain;
 use crate::types::{map_data::MapData, map_settings::MapGenerationRequest};
 
-/// Automatic startup retains the default scenery, with a simpler upstream path on error.
+/// Automatic startup retries simpler generation while preserving a requested city.
 pub(crate) fn generate_default(request: MapGenerationRequest) -> Result<MapData, String> {
     generate(request).or_else(|error| {
-        bevy::log::warn!("Default map generation failed; trying simple terrain: {error}");
-        use crate::types::map_settings::{MapDensity, MapRelief, MapRoads, MapSettings, MapWater};
+        bevy::log::warn!("Default map generation failed; retrying without water: {error}");
+        use crate::types::map_settings::{
+            MapDensity, MapPreset, MapRelief, MapRoads, MapSettings, MapWater,
+        };
+        let city = request.settings.preset == MapPreset::Town;
         generate(MapGenerationRequest {
             settings: MapSettings {
                 relief: MapRelief::Plains,
                 water: MapWater::None,
-                settlements: MapDensity::None,
-                roads: MapRoads::None,
+                settlements: if city {
+                    request.settings.settlements
+                } else {
+                    MapDensity::None
+                },
+                roads: if city {
+                    request.settings.roads
+                } else {
+                    MapRoads::None
+                },
                 ..request.settings
             },
             ..request
@@ -29,6 +40,12 @@ pub(crate) fn generate(request: MapGenerationRequest) -> Result<MapData, String>
     }
     let surface = terrain::generate(&request.settings)?;
     let (roads, buildings, settlement_count) = settlements::generate(&surface, &request)?;
+    if request.settings.preset == crate::types::map_settings::MapPreset::Town
+        && request.settings.settlements != crate::types::map_settings::MapDensity::None
+        && buildings.is_empty()
+    {
+        return Err("The city generator produced no buildings".into());
+    }
     Ok(decoration::convert(
         surface,
         roads,

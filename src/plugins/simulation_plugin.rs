@@ -1,7 +1,7 @@
 //! Resource initialization and system ordering for this subsystem.
 use crate::resources::{
     FactionEntities, MatchState, PendingDamage, PendingTowerAlerts, RandomStream, SimulationConfig,
-    SpatialIndex, SpawnSequence,
+    SpatialIndex, SpawnSequence, VisionOcclusion,
 };
 use crate::scheduling::{SimSet, simulation_running};
 use crate::systems::simulation::animation::update_arm_states;
@@ -15,6 +15,7 @@ use crate::systems::simulation::production::produce_minions;
 use crate::systems::simulation::spatial::rebuild_index;
 use crate::systems::simulation::targeting::{process_tower_alerts, select_combat_targets};
 use crate::systems::simulation::victory::check_victory;
+use crate::systems::simulation::vision::rebuild_vision_index;
 use bevy::prelude::*;
 
 pub struct SimulationPlugin;
@@ -24,6 +25,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<MatchState>()
             .init_resource::<FactionEntities>()
             .init_resource::<SpatialIndex>()
+            .init_resource::<VisionOcclusion>()
             .init_resource::<PendingDamage>()
             .init_resource::<PendingTowerAlerts>()
             .init_resource::<SpawnSequence>()
@@ -54,7 +56,10 @@ impl Plugin for SimulationPlugin {
             .add_systems(Startup, setup_match)
             .add_systems(PreUpdate, restart_match)
             .add_systems(FixedUpdate, advance_clock.in_set(SimSet::Spawn))
-            .add_systems(FixedUpdate, rebuild_index.in_set(SimSet::Index))
+            .add_systems(
+                FixedUpdate,
+                (rebuild_index, rebuild_vision_index).in_set(SimSet::Index),
+            )
             .add_systems(
                 FixedUpdate,
                 prepare_drag

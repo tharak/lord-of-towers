@@ -4,7 +4,7 @@
 
 ## Derived attributes
 
-Fire modifies damage, water movement speed, earth maximum health and air vision. Each attribute uses `base × [1 + .30 × matching_equipped_copies × (1 + .10 × equipped_void_copies)]`. Void alone grants no direct bonus. Base values are damage 10, speed 4, health 30 and vision 15. Birth stats start at two per element plus counts of the five consumed recipe units. Changing equipment preserves current/max health ratio.
+Fire modifies damage, water movement speed, earth maximum health and air vision. Each attribute uses `base × [1 + .30 × matching_equipped_copies × (1 + .10 × equipped_void_copies)]`. Void alone grants no direct bonus. Base values are damage 10, speed 4, health 90 and vision 15. Birth stats start at two per element plus counts of the five consumed recipe units. Changing equipment preserves current/max health ratio.
 
 ## Orders and reservations
 
@@ -24,4 +24,6 @@ For each type: deposits + cargo + stock + equipped + reserved + consumed = initi
 
 The minion panel is exactly three rows of five element buttons. Stock availability enables each type in all rows; the equipped type is outlined and can always be returned to a living friendly tower, even if its stock is zero. No slot selector, status, delivery or cancellation rows are shown. The tower uses one matching row; five selected units automatically submit the birth and reset selection.
 
-Equipment percentages are fixed: Fire +30% base damage, Water +30% base speed, Earth +30% base maximum health, Air +30% base vision, per equipped copy. Void increases these bonuses by 10% per equipped copy. Birth recipe points remain metadata and do not change these rates. One Fire gives 13 damage; Fire + Void gives 13.3; three Fire gives 19. Bases remain 10 damage, 4 units/s, 30 health and 15 vision.
+Equipment percentages are fixed: Fire +30% base damage, Water +30% base speed, Earth +30% base maximum health, Air +30% base vision, per equipped copy. Void increases these bonuses by 10% per equipped copy. Birth recipe points do not change equipment bonus rates; permanent Earth determines friendly-base healing. One Fire gives 13 damage; Fire + Void gives 13.3; three Fire gives 19. Bases remain 10 damage, 4 units/s, 90 health and 15 vision.
+
+Inside any living friendly tower’s influence circle (radius 15 by default), minions recover 1 HP per simulation second per permanent Earth point: starting minions heal 2 HP/s, and each Earth unit in a birth recipe adds 1 HP/s. Equipped Earth changes maximum health but does not change this healing rate. Healing continues during combat and dragging, stops at maximum health, and does not stack across overlapping friendly circles. Enemy bases and territory influence from minions grant no healing. Damage and destruction resolve before healing; dead units cannot be revived. Healing stops while paused, hidden or after victory and scales with simulation speed.

@@ -30,7 +30,9 @@ Every minion has permanent elemental stats starting at **2** each. Five consumed
 
 `base × [1 + 0.30 × equipped_copies × (1 + 0.10 × equipped_void_copies)]`
 
-Starting and newborn minions have empty slots: damage **10**, speed **4**, maximum health **30**, vision **15**. Void alone gives no bonus. Equipment changes preserve health percentage. Birth recipe points are retained as metadata and no longer scale equipment bonuses.
+Starting and newborn minions have empty slots: damage **10**, speed **4**, maximum health **90**, vision **15**. Void alone gives no bonus. Equipment changes preserve health percentage. A minion’s body fades from its faction color toward gray as its remaining health percentage decreases; equipment and cargo keep their element colors. Birth recipe points do not scale equipment bonuses; permanent Earth determines healing at friendly bases.
+
+Inside any living friendly tower’s influence circle (radius 15 by default), minions recover 1 HP per simulation second per permanent Earth point: starting minions heal 2 HP/s, and each Earth unit in a birth recipe adds 1 HP/s. Equipped Earth changes maximum health but does not change this healing rate. Healing continues during combat and dragging, stops at maximum health, and does not stack across overlapping friendly circles. Enemy bases and territory influence from minions grant no healing. Damage and destruction resolve before healing; dead units cannot be revived. Healing stops while paused, hidden or after victory and scales with simulation speed.
 
 Outside player dragging, minions prioritize visible tower defense, pending tower orders/cargo return, closest visible enemies, visible deposits, freshest unvisited friendly trail, then exploration. Carriers and ordered minions may shoot enemies in range but do not chase them unless defending a tower. Only friendly delivery tower locations are globally known; there is no shared faction vision.
 
@@ -50,7 +52,7 @@ For every element, **deposits + cargo + tower stock + equipped + reserved + cons
 
 ## Architecture and development
 
-See [architecture](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [gathering contracts](docs/gathering-contracts.md), [equipment contracts](docs/equipment-contracts.md), and the [shared wiki vocabulary](https://github.com/tharak/lord-of-towers/wiki). Gameplay and UI use Bevy ECS; simulation state is independent of mesh and material handles.
+See the [source guide](docs/source-guide.md), [architecture](docs/architecture.md), [entity catalog](docs/entity-catalog.md), [gathering contracts](docs/gathering-contracts.md), [equipment contracts](docs/equipment-contracts.md), and the [shared wiki vocabulary](https://github.com/tharak/lord-of-towers/wiki). Gameplay and UI use Bevy ECS; simulation state is independent of mesh and material handles.
 
 For native debugging, install stable Rust and Bevy's Linux windowing dependencies, then use `cargo run --locked`. Browser setup:
 

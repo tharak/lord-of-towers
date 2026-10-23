@@ -1,8 +1,7 @@
 use bevy::prelude::*;
-use lord_of_towers::{
-    equipment::EquipmentPlugin, gathering::GatheringPlugin, influence::InfluencePlugin,
-    inspector::InspectorPlugin, orders::PlayerInteractionPlugin, presentation::PresentationPlugin,
-    simulation::SimulationPlugin,
+use lord_of_towers::plugins::{
+    EquipmentPlugin, GatheringPlugin, InfluencePlugin, InspectorPlugin, PlayerInteractionPlugin,
+    PresentationPlugin, SimulationPlugin,
 };
 
 fn main() {

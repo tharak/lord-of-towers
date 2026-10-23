@@ -13,3 +13,6 @@ Permanent birth stats start at two each; recipes add matching points. Each equip
 Carriers create and refresh temporary trails; followers prefer the freshest visible unvisited friendly marker. Defense overrides homeward travel. Towers have fixed radius 15, are destroyed at zero health, and the last surviving tower wins. F3 inspects live ECS. Hide HUD and two-finger mobile camera controls remain available.
 
 See repository [equipment contracts](https://github.com/tharak/lord-of-towers/blob/main/docs/equipment-contracts.md). Validation is native/web compilation only; no automated tests or runtime smoke checks.
+
+
+Source navigation: components have individual files in `src/components/`, entity construction lives in `src/entities/`, behavior in `src/systems/`, and registration in `src/plugins/`. See the [source guide](https://github.com/tharak/lord-of-towers/blob/main/docs/source-guide.md) for common editing tasks.
